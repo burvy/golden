@@ -89,9 +89,9 @@ grid from ~700 MB to ~56 MB.
 ### Built and wired (11/14 late)
 - **Server** (`cargo run -p server`, :8787) serves `web/` and every endpoint in `docs/contracts.md`: sun, horizon, search,
   scene (+bin), photo (+jpg), buildings, agent, Vexcel tiles. Heights: Vexcel, else USGS LiDAR, held in memory (4 grids).
-- **Agent** (`POST /api/agent`): read the brief (Gemini if `GEMINI_API_KEY`, else a rule reader) -> search (re-plans:
+- **Agent** (`POST /api/agent`): read the brief (Claude if `ANTHROPIC_API_KEY`, else a rule reader) -> search (re-plans:
   relaxes framing/standing, widens the area) -> sun path -> Vexcel oblique for the primary -> CoStar contacts -> write the
-  sheet (Gemini, with every time checked against the tools, else templates). `steps` lists what it did.
+  sheet (Claude, with every time checked against the tools, else templates). `steps` lists what it did.
 - **Web** (`web/index.html`): the brief goes to the agent; spots, call sheet, skyline panorama, 3D view (scene ring 1,
   4 m cells, ~1 km), Vexcel aerial photo and CoStar contacts all come from the server. The map draws Vexcel tiles,
   Esri World Imagery where Vexcel has none. Each pane still falls back to sample data if its endpoint fails.
@@ -168,6 +168,9 @@ simulation, render what that camera would see with the sun at a given minute, an
 the user's photo, then move the camera and try again. Every number it reports (coordinates, heading, height,
 times, distances) comes from a tool, not from the model's text. That loop (look → hypothesise → render →
 compare → refine) is what a plain chatbot can't do.
+
+> **11/14: burvy switched the built agent (`POST /api/agent`) from Gemini to Claude (task 027).** This photo-match
+> plan (not built) still names Gemini and the MLH Gemini prize; re-decide its model before building it.
 
 **Model:** Gemini (MLH "Best Use of Gemini API"), multimodal: it reads the user's photo and our renders.
 The model ID goes in `GEMINI_MODEL` (the user said "gemini 4 hydrogen"; check the exact ID with the models
@@ -261,16 +264,16 @@ sub-agents, scratch files), in a small Python service next to the Rust server.
 | Skyline matching, sun inverse search | `crates/core` | Pure, unit-tested |
 | `vexcel::search_similar(text or image, area)` | `crates/vexcel` | Wraps `/v2/embedding/extract`, cached |
 
-#### Keys (Gemini)
-Get a key at https://aistudio.google.com/apikey and add two lines to **`env/.env`** (gitignored; don't paste the
+#### Keys (Claude)
+The built agent (`crates/server/src/agent/claude.rs`) calls the Anthropic Messages API with JSON output constrained
+by a schema, twice per brief: read the brief, then write the words. Add to **`env/.env`** (gitignored; don't paste the
 key in chat or commit it):
 ```
-GEMINI_API_KEY=your-key-here
-GEMINI_MODEL=the-model-id
+ANTHROPIC_API_KEY=your-key-here
+# optional, default claude-sonnet-5-5
+GOLDEN_CLAUDE_MODEL=claude-sonnet-5-5
 ```
-Check the exact model ID, without printing the key: list the models with
-`curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models`.
-The agent passes the key explicitly to `ChatGoogleGenerativeAI(model=..., api_key=...)`.
+With no key the agent runs as the offline mock. The server prints only whether a key was found.
 
 ### Phone budget (iPhone 13 Pro)
 - JSON responses < ~200 KB; heights as a separate u16 binary; photos ≤ 2048 px (default 1024); textures ≤ 4096.
