@@ -7,6 +7,8 @@ Read `DESIGN.md` and `docs/contracts.md` first.
 
 ENSURE THE HUMAN UNDERSTANDS WHAT YOU ARE BUILDING
 
+ALWAYS KEEP A DEVLOG, MAKE IT IN `docs/person/DEVLOG.md`
+
 1. **Stay in your part's folder.** Need something from another part? Use its fixture in `fixtures/`, or ask your
    human to raise it with the owner. Don't edit their code.
 2. **Contracts are shared.** Don't change a shape in `docs/contracts.md` inside a feature PR. Propose it in a
