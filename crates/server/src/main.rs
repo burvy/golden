@@ -6,6 +6,8 @@
 //!   GET /api/sun?lat=..&lon=..&date=YYYY-MM-DD
 //!       200 {"time":"2026-06-22T03:07:41Z","azimuth_deg":299.33}
 //!       400 bad/missing query params, 422 no sunset that day (polar day/night)
+//!   GET /api/tiles/vexcel/{z}/{x}/{y}       Vexcel aerial map tile (proxy + cache), 204 where none
+//!   GET /proto/map                          map prototype: basemap + Vexcel + day/night shading + time slider
 
 use axum::{
     Json, Router,
@@ -17,6 +19,8 @@ use axum::{
 use chrono::{NaiveDate, SecondsFormat};
 use golden_core::sun::{self, NoSunset};
 use serde::{Deserialize, Serialize};
+
+mod tiles;
 
 const ADDR: &str = "127.0.0.1:8787";
 
@@ -34,6 +38,7 @@ fn app() -> Router {
         .route("/", get(index))
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/sun", get(get_sun))
+        .merge(tiles::routes())
 }
 
 async fn index() -> &'static str {

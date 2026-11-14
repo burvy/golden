@@ -20,6 +20,7 @@ pub mod client;
 pub mod geotiff;
 pub mod grid;
 pub mod oblique;
+pub mod ortho;
 pub mod resample;
 pub mod tiles;
 
