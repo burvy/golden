@@ -26,6 +26,9 @@ pub const FLANK_MIN_DEG: f64 = 3.0;
 pub const GAP_SEARCH_DEG: f64 = 15.0;
 /// Past the edge of a flank, how far to look for its full height.
 pub const FLANK_LOOK_DEG: f64 = 3.0;
+/// The sun only counts as in view after this long in a row: shorter glimpses through slots
+/// don't make the spot "clear until" then.
+pub const MIN_IN_VIEW_S: i64 = 60;
 
 /// The sun at one instant.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -126,13 +129,11 @@ pub fn blocks(sky: &SkyWindow, s: &TrackSample) -> bool {
 /// Sum up what the sun does seen from a spot with skyline `sky`.
 pub fn look(track: &SunTrack, sky: &SkyWindow) -> Look {
     let samples = &track.samples;
-    let hidden = match samples.first() {
-        None => Hidden::Never,
-        Some(first) if !blocks(sky, first) => Hidden::Never,
-        Some(_) => match samples.iter().position(|s| !blocks(sky, s)) {
-            Some(i) => Hidden::At(i),
-            None => Hidden::AllTrack,
-        },
+    let hidden = match first_in_view(track, sky) {
+        _ if samples.is_empty() => Hidden::Never,
+        Some(0) => Hidden::Never,
+        Some(i) => Hidden::At(i),
+        None => Hidden::AllTrack,
     };
     let (hidden_elev_deg, hidden_dist_m) = match hidden {
         Hidden::Never => (0.0, None),
@@ -156,6 +157,23 @@ pub fn look(track: &SunTrack, sky: &SkyWindow) -> Look {
         golden_visible_s: visible * track.step_s,
         gap,
     }
+}
+
+/// Index of the first sample (walking from the flat event) that starts at least
+/// `MIN_IN_VIEW_S` of the sun in view. A shorter run at the end of the track also counts.
+/// Shorter glimpses, like the sun passing a thin slot between towers for 20 s, are skipped:
+/// nobody can film them, and the exact `sun_block` (1 min steps) doesn't see them either.
+fn first_in_view(track: &SunTrack, sky: &SkyWindow) -> Option<usize> {
+    let need = (MIN_IN_VIEW_S as f64 / track.step_s.max(1) as f64).ceil().max(1.0) as usize;
+    let last = track.samples.len().checked_sub(1)?;
+    let mut run = 0;
+    for (i, s) in track.samples.iter().enumerate() {
+        run = if blocks(sky, s) { 0 } else { run + 1 };
+        if run > 0 && (run >= need || i == last) {
+            return Some(i + 1 - run);
+        }
+    }
+    None
 }
 
 /// The gap around `az` (where the sun is when it was last seen), if the skyline is low there
@@ -371,6 +389,19 @@ mod tests {
         assert!((g.width_deg - 5.0).abs() < 1e-9, "{g:?}"); // first >= 3° at ±2.5 from 300
         assert_eq!(g.near_dist_m, Some(100.0));
         assert!(score_between(&l) > 0.6, "{}", score_between(&l));
+    }
+
+    #[test]
+    fn short_glimpse_through_a_slot_does_not_count_as_in_view() {
+        // A 15° wall with a slot the sun crosses in under a minute (az 299.0..298.9, k 20..22, about 2° up).
+        let slot = sky(|az| if (298.9..=299.0).contains(&az) { (-1.0, Some(900.0)) } else { (15.0, Some(100.0)) });
+        let l = look(&track(), &slot);
+        // Seen properly only once it clears the wall: k = 124, elev 15.0 (a wall must be higher to hide it).
+        assert_eq!(l.hidden, Hidden::At(124), "{l:?}");
+        assert_eq!(score_behind(&l), 0.0);
+        // A slot wide enough for a minute or more does count.
+        let wide = sky(|az| if (298.5..=299.5).contains(&az) { (-1.0, Some(900.0)) } else { (15.0, Some(100.0)) });
+        assert!(matches!(look(&track(), &wide).hidden, Hidden::At(i) if i < 20));
     }
 
     #[test]
