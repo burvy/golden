@@ -39,6 +39,7 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `Building` | defined | costar | `building::{Building, BuildingList}` | `buildings.json` |
 | `ApiError` | defined | server | `error::ApiError` | `error.json` |
 | `AgentRequest`, `CallSheet` | defined | server | `agent::{AgentRequest, CallSheet}` | `agent_request.json`, `call_sheet.json` |
+| `MeshAt` | defined | server | none yet (built with `json!` in `crates/server/src/mesh.rs`; the fixture isn't parse-tested) | `mesh_at.json` |
 
 All fixtures are in `fixtures/`. `cargo test -p contracts` checks every fixture parses into its struct.
 Fixture numbers are realistic but made up (except the sun times, which are NOAA's for downtown LA).
@@ -59,6 +60,9 @@ Server: `http://localhost:8787` (`crates/server`). All `GET` parameters are quer
 | `GET /api/buildings/{id}` | `Building` | One building |
 | `POST /api/agent` | `CallSheet` | Free-text brief in, call sheet out (the agent) |
 | `GET /api/tiles/vexcel/{z}/{x}/{y}` | JPEG/PNG tile, or **204** | Vexcel aerial map tiles for MapLibre (XYZ, z0–21). 204 = no imagery for us here: show the fallback (Esri World Imagery). 400 for an impossible tile. `Cache-Control` 7 days. |
+| `GET /api/mesh/at` | `MeshAt`, or **404** | Is there a Vexcel textured 3D mesh at this point? 404 = none here: use the height-map 3D view |
+| `GET /api/mesh/near/{lat}/{lon}/{r}/tileset.json?...` | 3D Tiles tileset JSON | Vexcel's tileset through our proxy (key hidden), trimmed to `r` m (50–20000) around the point. Child URIs are relative, so they stay on the proxy |
+| `GET /api/mesh/near/{lat}/{lon}/{r}/tile.glb?...` | glTF binary (`model/gltf-binary`, Draco + KTX2) | One mesh tile. `Cache-Control` 7 days |
 
 **Errors** (every endpoint): JSON `ApiError` `{"error": "human-readable message"}` with status:
 
@@ -141,6 +145,21 @@ Must show `attribution` next to the image (Vexcel licence).
 
 Returns `BuildingList`, nearest first. Only CoStar's commercial properties (1,581 in LA): most houses and many
 small buildings are not in it, so an empty list is normal. `GET /api/buildings/{id}` returns one `Building` (404 if unknown).
+
+### GET /api/mesh/at
+`?lat=34.04934&lon=-118.25076`
+
+| Param | Default | Meaning |
+|---|---|---|
+| `lat`, `lon` | required | The spot (the eye of the 3D view) |
+
+Returns `MeshAt`, or 404 where Vexcel has no 3D mesh (e.g. Princeton): the app then uses the height-map 3D view.
+Load `tileset_url` (relative to the API base) with a 3D Tiles viewer; its tiles come from
+`/api/mesh/near/{lat}/{lon}/{r}/tile.glb?...`. `/api/mesh/tileset.json` and `/api/mesh/tile.glb` without `near/...` also exist: same, untrimmed.
+
+Everything is cached on the server's disk. The Vexcel key is only needed for what isn't cached yet, so a cached area
+keeps working without a key. Errors: 400 bad lat/lon/r or unknown field; 404 no mesh here, or unknown tile;
+502 Vexcel failed; 503 not cached and the server has no Vexcel key.
 
 ### DsmGrid
 
@@ -387,6 +406,22 @@ Heights for the 3D view, in rings of decreasing detail, so the phone draws ~200k
 
 ### ApiError
 `{"error": "lat must be in [-90, 90] and lon in [-180, 180]"}`, with a status code from the table under Endpoints.
+
+### MeshAt
+From `GET /api/mesh/at`.
+```json
+{
+  "collection": "us-ca-losangeles-downey-2020-2021",
+  "tileset_url": "/api/mesh/near/34.04934/-118.25076/3000/tileset.json?collection=us-ca-losangeles-downey-2020-2021&layer=3d-cities",
+  "attribution": "3D mesh © Vexcel Imaging US, Inc. · © Microsoft"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `collection` | The Vexcel 3D collection covering the point. |
+| `tileset_url` | Relative to the API base. A 3D Tiles tileset (load with e.g. 3d-tiles-renderer), trimmed to 3000 m around the point. |
+| `attribution` | Must be shown on the 3D view (Vexcel licence). |
 
 ### AgentRequest and CallSheet
 `POST /api/agent` turns a typed brief into a call sheet. The agent (Claude when `ANTHROPIC_API_KEY` is set, else an offline mock)
