@@ -1,0 +1,16 @@
+{
+  "center_lat": 34.049,
+  "center_lon": -118.251,
+  "cell_m": 1.0,
+  "width": 64,
+  "height": 64,
+  "nodata": -9999.0,
+  "source": {
+    "provider": "synthetic",
+    "collection": null,
+    "captured_from": null,
+    "captured_to": null,
+    "native_res_m": 1.0
+  },
+  "data_file": "dsm_grid.f32"
+}

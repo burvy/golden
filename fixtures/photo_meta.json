@@ -1,0 +1,10 @@
+{
+  "id": "fixture",
+  "kind": "oblique",
+  "image_url": "/api/photo/fixture.jpg",
+  "width": 1024,
+  "height": 683,
+  "look_az_deg": 284.0,
+  "captured": "2026-04-19",
+  "attribution": "Imagery © Vexcel Imaging US, Inc."
+}

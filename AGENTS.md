@@ -7,6 +7,8 @@ Read `DESIGN.md` and `docs/contracts.md` first.
 
 ENSURE THE HUMAN UNDERSTANDS WHAT YOU ARE BUILDING
 
+NEVER COMMIT FOR THE HUMAN, GIVE THE HUMAN A COMMIT SUGGESTION SUCH THAT THEY UNDERSTAND WHAT THEY ARE COMMITTING
+
 ALWAYS KEEP A DEVLOG, MAKE IT IN `docs/<person>/DEVLOG.md`
 
 1. **Stay in your part's folder.** Need something from another part? Use its fixture in `fixtures/`, or ask your

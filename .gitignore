@@ -2,3 +2,8 @@
 /cache
 .env
 *.env
+env/
+.env.*
+*.tif
+*.tiff
+node_modules/

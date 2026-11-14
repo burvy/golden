@@ -12,17 +12,17 @@ HackPrinceton Fall 2026 Entertainment track - CoStar "AI for the Built World"
 
 ## Run it
 
-**Prerequisites:** Rust 1.85+ (edition 2024), Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
+**Prerequisites:** Rust (stable) <!--TODO Gogi: Version-->, Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
 
 ```powershell
-.\build.ps1 # release build of core + server (and web/ once it exists); add -Test to also run tests
+.\build.ps1 # builds everything  <!-- TODO Gogi: what is "everything" -->
 .\run.ps1 # starts the server
 ```
 Then open http://localhost:8787.
 
 Without the scripts (any OS):
 ```sh
-cargo run --release -p server
+cargo run -p server # TODO Gogi: confirm
 ```
 
 ## Test
@@ -36,9 +36,17 @@ Set these as environment variables. **Never commit their values.**
 
 | Variable | What for | If missing |
 |---|---|---|
-| `VEXCEL_API_KEY` | Height maps and aerial photos | Vexcel features use cached data or fixtures <!-- TODO confirm --> |
+| `VEXCEL_API_KEY` | Height maps and aerial photos | Falls back to `VEXCEL_ENV_FILE`. With neither, areas already in the cache still work; new areas fail with a "no Vexcel key" error |
+| `VEXCEL_ENV_FILE` | Path to a `.env` file containing `VEXCEL_API_KEY=...`, instead of setting the key directly. Keep it in `env/` (gitignored), e.g. `env/.env` | Only `VEXCEL_API_KEY` is checked |
+| `VEXCEL_CACHE_DIR` | Where downloaded Vexcel height-map tiles are kept (gitignored). A 200 m area is ~300 MB, a 1 km area ~1 GB | `cache/` in the folder you run from |
 | `COSTAR_KIT_DIR` | Path to the CoStar data kit (kept out of git) | Building lookups use fixtures |
 | TODO: Some AI key | The scouting agent | The agent runs on an offline mock |
+
+PowerShell example (current window only):
+```powershell
+$env:VEXCEL_ENV_FILE = "$PWD\env\.env"
+cargo run -p vexcel --example fetch_dsm -- 34.049 -118.251 60   # lat lon radius_m: checks the key works
+```
 
 ## How it works
 <!-- TODO by H20: 4–5 plain steps, e.g. -->
@@ -55,19 +63,20 @@ PhotoPills tells you where the sun is. golden tells you where to stand, and show
 ## Limits
 <!-- TODO by H20: be honest; judges trust this -->
 - Data only covers Los Angeles and Houston.
-- Height map date: <!-- TODO --> (newer buildings may be missing).
+- Height map date: LA flown 19–29 April 2026 (Vexcel collection `n34w118-us-ca-losangeles-2026`); newer buildings may be missing.
 - What's computed vs estimated: <!-- TODO -->
 
 ## Repo map
 | Folder | What | Owner |
 |---|---|---|
 | `crates/core` | Pure maths: coordinates, sun, horizon, scoring, search. No network, no files. | burvy |
-| `crates/vexcel` | Height map and aerial photo download, cache, downsample | Ray |
+| `crates/vexcel` | Height map and aerial photo download, cache, downsample | Gogi |
 | `crates/costar` | CoStar kit loader + building lookup | Kinesiology <!-- TODO name --> |
-| `crates/server` | HTTP API on :8787 and the agent | Ray |
+| `crates/server` | HTTP API on :8787 and the agent | Gogi |
 | `web/` | Map, brief box, spot card, 3D skyline | Frontend <!-- TODO name --> |
 | `docs/` | Contracts, pitch, Devpost, devlogs (`docs/<name>/DEVLOG.md`) | everyone |
 | `fixtures/` | One sample file per data shape in `docs/contracts.md` | everyone |
+| `crates/contracts` | The shapes from `docs/contracts.md` as Rust structs. Pure, so `core` can use it; IO crates fill it | everyone (contract PRs only) |
 
 ## How we work
 - Read [AGENTS.md](AGENTS.md) first (people and AI agents alike).
