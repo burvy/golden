@@ -102,3 +102,16 @@
   Vexcel photo (hidden now), "next sunset" not saying it was tomorrow's.
 - Found Vexcel's textured 3D city mesh (`/v2/3d/tileset`, LA 2020-21, Houston 2023): good base for "street view" before splats.
 - **Weather**: Open-Meteo (free, no key, low/mid/high cloud split, aerosols). Tested for Princeton.
+
+11/14/26, evening - Fallback map, photo-match design, sponsor plan
+- **Fallback aerial map wired in** (`crates/server/static/proto_map.html`): Esri World Imagery under the Vexcel layer, so
+  outside LA/Houston (Vexcel answers 204) you still get an aerial photo. Tested on an emulated iPhone 13 Pro: Princeton z17
+  shows Esri's campus photo, downtown LA shows Vexcel on top. Added a Photo / Map button (`?view=map`).
+  Checked others: EOX Sentinel-2 works but is 10 m/px; USGS imagery tiles 404.
+- **Dropped Peri.** DESIGN.md prize section rewritten: deepagents = yes, plus MLH Gemini, MongoDB Atlas, Vultr, GoDaddy
+  (HTTPS needed for camera/location on iPhone), DEV post. Skip Solana, Arlequin, Physical AI.
+- **Photo match designed** (DESIGN.md "Photo match"): upload a photo → Gemini + deepagents find where and when to retake it.
+  Tools own the numbers; the 3D sim (`/api/render`, same three.js view in headless Chrome) is the agent's eyes; skyline fit
+  and sun inverse search in `core`; Vexcel `/v2/embedding/extract` similarity search for candidates; benchmark of Gemini alone
+  vs Gemini + tools on geotagged LA photos.
+- Gemini key goes in `env/.env` as `GEMINI_API_KEY` + `GEMINI_MODEL` (README rows added). Model ID not verified yet.

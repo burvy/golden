@@ -39,6 +39,8 @@ Set these as environment variables. **Never commit their values.**
 | `VEXCEL_API_KEY` | Height maps and aerial photos | Falls back to `VEXCEL_ENV_FILE`. With neither, areas already in the cache still work; new areas fail with a "no Vexcel key" error |
 | `VEXCEL_ENV_FILE` | Path to a `.env` file containing `VEXCEL_API_KEY=...`, instead of setting the key directly. Keep it in `env/` (gitignored), e.g. `env/.env` | Only `VEXCEL_API_KEY` is checked |
 | `VEXCEL_CACHE_DIR` | Where downloaded Vexcel height-map tiles are kept (gitignored). A 200 m area is ~300 MB, a 1 km area ~1 GB | `cache/` in the folder you run from |
+| `GEMINI_API_KEY` | Photo-match agent (planned, see DESIGN.md "Photo match"). Get one at aistudio.google.com/apikey; put it in `env/.env` | Agent off |
+| `GEMINI_MODEL` | Gemini model ID for the agent; check it with the models list (DESIGN.md "Keys") | Agent off |
 | `COSTAR_KIT_DIR` | Path to the CoStar data kit (kept out of git) | Building lookups use fixtures |
 | TODO: Some AI key | The scouting agent | The agent runs on an offline mock |
 

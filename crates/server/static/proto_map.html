@@ -22,11 +22,15 @@
   #phase { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: #333; }
   #info { font-size: 13px; opacity: 0.8; margin-top: 4px; font-variant-numeric: tabular-nums; }
   input[type=range] { box-sizing: border-box; width: 100%; margin: 12px 0 0; height: 32px; accent-color: #ff9a3c; }
+  #viewbtn { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 12px; z-index: 2;
+    font: 600 14px -apple-system, system-ui, sans-serif; color: #fff; background: rgba(20, 20, 28, 0.82);
+    border: 0; border-radius: 999px; padding: 10px 16px; min-height: 44px; }
   #ticks { display: flex; justify-content: space-between; font-size: 11px; opacity: 0.6; }
 </style>
 </head>
 <body>
 <div id="map"></div>
+<button id="viewbtn" type="button">Map</button>
 <canvas id="shade"></canvas>
 <div id="panel">
   <div id="row"><span id="time">--:--</span><span id="phase">-</span></div>
@@ -114,15 +118,22 @@ const map = new maplibregl.Map({
   center: [start.lon, start.lat], zoom: start.z, attributionControl: { compact: true },
 });
 map.on('load', () => {
+  // Fallback aerial photo for everywhere Vexcel doesn't cover (our key: only greater LA and Houston).
+  // Vexcel answers 204 outside its area, so its layer is transparent there and this one shows through.
+  map.addSource('esri', {
+    type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+    tileSize: 256, maxzoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+  });
   map.addSource('vexcel', {
     type: 'raster', tiles: [location.origin + '/api/tiles/vexcel/{z}/{x}/{y}'], tileSize: 256,
     minzoom: 12, maxzoom: 21, attribution: 'Imagery © Vexcel Imaging US, Inc.',
   });
   // Under the labels, over the basemap fill. Below z12 Vexcel's tiles are mostly black padding.
-  // The basemap's own buildings (flat and 3D blocks) would cover the real photo: hide them.
-  for (const l of map.getStyle().layers) if (l.id.includes('building')) map.setLayoutProperty(l.id, 'visibility', 'none');
+  // The basemap's own buildings (flat and 3D blocks) would cover the real photo: setImagery hides them.
   const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
+  map.addLayer({ id: 'esri', type: 'raster', source: 'esri' }, firstSymbol);
   map.addLayer({ id: 'vexcel', type: 'raster', source: 'vexcel', minzoom: 12 }, firstSymbol);
+  setImagery(imagery);
   map.addSource('sunlines', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({ id: 'sunset-line', type: 'line', source: 'sunlines', filter: ['==', ['get', 'kind'], 'sunset'],
     paint: { 'line-color': '#ff7a1a', 'line-width': 4, 'line-dasharray': [2, 1.5] } });
@@ -131,13 +142,22 @@ map.on('load', () => {
   update();
 });
 map.on('move', () => { drawShade(); });
+// Photo vs plain map. ?view=map starts on the plain map.
+let imagery = q.get('view') !== 'map';
+function setImagery(on) {
+  imagery = on;
+  for (const id of ['esri', 'vexcel']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+  for (const l of map.getStyle().layers) if (l.id.includes('building')) map.setLayoutProperty(l.id, 'visibility', on ? 'none' : 'visible');
+  document.getElementById('viewbtn').textContent = on ? 'Map' : 'Photo';
+}
+document.getElementById('viewbtn').onclick = () => setImagery(!imagery);
 // ?debug=1: show map errors and tile state on the panel (for headless screenshots).
 const debug = q.has('debug'), errs = [];
 map.on('error', e => { errs.push(String(e.error?.message || e.error || e).slice(0, 80)); showDebug(); });
 map.on('idle', showDebug);
 function showDebug() {
   if (!debug) return;
-  const st = ['openmaptiles', 'vexcel'].map(id => `${id}:${map.getSource(id) ? (map.isSourceLoaded(id) ? 'ok' : 'loading') : 'none'}`);
+  const st = ['openmaptiles', 'esri', 'vexcel'].map(id => `${id}:${map.getSource(id) ? (map.isSourceLoaded(id) ? 'ok' : 'loading') : 'none'}`);
   document.getElementById('info').textContent = `z${map.getZoom().toFixed(1)} ${st.join(' ')} gl:${!!map.painter} errs:${errs.length} ${errs.slice(0, 2).join(' | ')}`;
 }
 map.on('moveend', update);

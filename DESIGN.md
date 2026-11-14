@@ -8,8 +8,8 @@ path, Vexcel's aerial photo of the view, and the CoStar building with who to ask
 in a city full of buildings.
 
 HackPrinceton F26, 24 h. Tracks (details in "Prize tracks" below): Entertainment (main), CoStar "AI for the Built World" (needs 2 of
-Vexcel / CoStar / Matterport, plus an agent), Amazon Practical AI, Peri Forward Deployed (needs a real
-business or club consulted, e.g. a campus film club).
+Vexcel / CoStar / Matterport, plus an agent), Amazon Practical AI, LangChain deepagents, and MLH prizes
+(Gemini, MongoDB Atlas, Vultr, GoDaddy, DEV). Not going for Peri.
 
 ## The app (v2, 11/14, draft: will be updated)
 **What it is:** a phone mapping app that helps anyone (tourists, photographers, people out for a walk) find a
@@ -27,15 +27,21 @@ WebGL in mobile Safari.
    outlook, the Vexcel oblique photo looking toward the sunset, and who to ask for roof access (CoStar).
 3. **Street view**: stand at the spot and look around at the chosen time, with the sun where it will be.
 4. **Find a spot** (brief/agent): "sunset between two towers from a rooftop, late June" → ranked spots on the map.
+5. **Photo match**: upload a photo you love (Pinterest, Instagram) → the agent finds where and when you can take
+   one like it, shows the simulated view next to yours, and you can chat with it. See "Photo match" below.
 
 ### Map feature (tested 11/14, see "Map: test results" below)
 - **Layers, bottom to top:**
   1. Global basemap: OpenFreeMap (free, no key, vector tiles), so the map works everywhere, including Princeton.
-  2. Vexcel aerial photos (ortho tiles) on top, wherever Vexcel gives us imagery. The phone gets them through our server
-     (`/api/tiles/vexcel/{z}/{x}/{y}`), never with the key. Where there is none, the server answers 204 and
-     the basemap shows through.
-  3. Day/night shading (below).
-  4. Sun line (where the sun is now, yellow) and sunset line (where it will set, dashed orange) from the map centre.
+  2. **Fallback aerial photo everywhere else: Esri World Imagery** (free, no key, good to ~z19; tested 200 at
+     Princeton). Attribution "Esri, Maxar, Earthstar Geographics" is required and shown. Free use is fine for a
+     hackathon demo; production needs an ArcGIS account (or switch to EOX Sentinel-2 cloudless, which is free but
+     only 10 m per pixel). USGS imagery tiles returned 404.
+  3. Vexcel aerial photos (ortho tiles) on top, wherever Vexcel gives us imagery: sharper and newer than Esri.
+     The phone gets them through our server (`/api/tiles/vexcel/{z}/{x}/{y}`), never with the key. Where there
+     is none, the server answers 204 and the fallback photo shows through.
+  4. Day/night shading (below).
+  5. Sun line (where the sun is now, yellow) and sunset line (where it will set, dashed orange) from the map centre.
 - **Day/night shading:** for a grid of points on the screen we compute the sun's elevation at that place and
   time (NOAA formulas, same as `core::sun`) and tint the map by it: none in daylight, warm orange in golden hour
   (sun 0–8°), blue in blue hour (0 to −6°), dark navy at night (below −18°). The grid is stretched smoothly over
@@ -47,6 +53,8 @@ WebGL in mobile Safari.
     shadows** from the Vexcel height map later (LA/Houston).
 - **Time slider:** now → +24 h in 10-minute steps. Moves the shading, the sun line, and the times on the panel.
   Times are shown in the place's own time zone (`tz`, see docs/contracts.md), not the phone's.
+- **Photo / Map button** (top left) switches between the aerial photo (Vexcel + Esri) and the plain map
+  (with its buildings). `?view=map` starts on the plain map.
 - Prototype: `cargo run -p server`, then open http://localhost:8787/proto/map
   (`?lat=..&lon=..&z=..&tz=America/Los_Angeles&t0=2026-06-21T19:30:00-07:00&h=2` to jump somewhere).
 
@@ -56,12 +64,14 @@ WebGL in mobile Safari.
 | Downtown LA, z16 | yes (z0–z21) | Aerial photo + shading + sun/sunset lines. Loads in ~5 s cold, then cached. |
 | Princeton, z14 | **no: 403 Forbidden** | Basemap + shading + sunset line (16:43 at 246°, matches Open-Meteo's 16:42). |
 | North America, z2 | edge of LA/Houston only | Shading shows the sunset line sweeping across the continent. |
+| Princeton, z17, with fallback | no (204) | **Esri aerial photo** of campus + labels + sun lines. Loads in ~5 s. |
+| Downtown LA, z17, with fallback | yes | Vexcel photo on top (Esri hidden under it). |
 
 **Vexcel does not work everywhere with our key.** It is geofenced: greater LA (incl. Santa Monica, Pasadena,
 Long Beach, Irvine) and greater Houston (incl. Galveston) return imagery; Princeton, NYC, Philadelphia, Chicago,
 San Diego, Austin, rural Kansas and London return **403 Forbidden** (access, not "no imagery"). Even asking what
 imagery exists at Princeton is 403. Zoomed out, Vexcel tiles are black outside coverage, so we only show the
-Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on the basemap; the bird's-eye photos,
+Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on the basemap plus the Esri fallback photo; the bird's-eye photos,
 obliques, heights (and so "when do buildings hide the sun") work only in LA and Houston. The demo is in LA.
 Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothing in the code changes.
 
@@ -89,6 +99,114 @@ Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothin
   (need keys; Tomorrow.io has good cloud layers but a small free tier).
 - **Sunset score idea:** good when mid/high cloud is 30–70%, low cloud near the sunset direction is low,
   no rain, and visibility is high. Show it as "Sunset outlook: great / ok / poor" on the spot card.
+
+### Photo match: "where and when can I take this photo?" (11/14, design, not built)
+**The user story:** you saw a photo on Pinterest or Instagram (a sunset between towers, a pier at golden hour)
+and want to take one like it. You upload it. The agent works out **where to stand, which way to point, how
+high, and on which dates and minutes the sun will be in the same place**, shows you our simulated view next
+to your photo, and you can chat with it ("closer to Santa Monica", "not a rooftop", "this weekend only").
+Then tap the spot → street view to scout it before you go.
+
+**Why this is not an LLM wrapper.** A chatbot can guess "looks like Santa Monica Pier." Our agent has to
+*prove* it: it can open the map, query Vexcel's image search, read the height map, put a camera in our 3D
+simulation, render what that camera would see with the sun at a given minute, and compare the render with
+the user's photo, then move the camera and try again. Every number it reports (coordinates, heading, height,
+times, distances) comes from a tool, not from the model's text. That loop (look → hypothesise → render →
+compare → refine) is what a plain chatbot can't do.
+
+**Model:** Gemini (MLH "Best Use of Gemini API"), multimodal: it reads the user's photo and our renders.
+The model ID goes in `GEMINI_MODEL` (the user said "gemini 4 hydrogen"; check the exact ID with the models
+list once the key is in, see "Keys" below). Harness: LangChain **deepagents** (planning to-do list,
+sub-agents, scratch files), in a small Python service next to the Rust server.
+
+#### The pipeline (each step is a tool or a sub-agent; the plan and steps stream to the phone)
+1. **Read the photo** (sub-agent `reader`): returns a structured *fingerprint* with a confidence for each field.
+   - EXIF first (deterministic): GPS, time, focal length, compass heading. Instagram and Pinterest strip
+     EXIF, so usually there is none, but when there is, it's ground truth.
+   - Gemini, structured output: scene type (skyline / beach / pier / park / mountain), named landmarks
+     and any readable text (signs, shop names), the skyline silhouette as ~50 (x, y) points, horizon line,
+     where the sun is in the frame (or the light direction from shadows), its height above the horizon in
+     degrees (from the horizon line and the estimated field of view), focal length / field of view,
+     camera height (ground, rooftop, drone), and season clues (leaves, clothes).
+2. **Find candidate places** (sub-agent `scout`), wide to narrow:
+   - **Landmarks:** Gemini with **Google Search grounding** names them; we geocode them (Nominatim or
+     OpenStreetMap). Model text alone is never trusted for coordinates.
+   - **Vexcel image similarity search** (`/v2/embedding/extract`, LA/Houston): search by `search-text` (for
+     example "pier with ferris wheel over the ocean") and by `search-image` (the user's photo or a crop) inside
+     the area, `product-type=oblique`. Returns places whose aerial photos look similar. Caveat: the user's
+     photo is from the ground and Vexcel's are from the air. **Test early** whether image search works across
+     that gap; text search is the safe default.
+   - **Map features** (OpenStreetMap / Overpass): viewpoints, piers, peaks, rooftop bars, parks with a
+     western view.
+   - **CoStar:** buildings at a candidate whose roof height matches the camera height ("shot from about the 20th floor").
+3. **Place the camera** (sub-agent `surveyor`): for each candidate, solve where the camera stands and which way
+   it points.
+   - From the landmark's position and its direction and size in the photo (known field of view) → a first guess
+     at the camera position and heading.
+   - **Numeric refinement, not LLM guessing:** a small search over position, height and heading that
+     maximises how well our **rendered skyline** (Vexcel height map, `core::horizon`) matches the photo's
+     skyline points. This is plain maths in `core`, testable with synthetic walls.
+   - **Visual check in the simulation** (`render_view`, below): render the best poses and have Gemini compare
+     each with the user's photo, side by side, against a fixed rubric (same landmarks? same order left to
+     right? horizon at the same height? similar framing?) and give a score. Loop until good enough, or until
+     the step budget runs out (then say so).
+4. **Find the time** (sub-agent `timer`): we know the camera heading, so the sun's position in the photo gives
+   its azimuth and elevation. `core::sun` searches the next 12 months for the minutes when the sun is there.
+   Because the sunset azimuth moves with the seasons, this also gives **the season**: "between Apr 20–28 and
+   Aug 15–23, 19:42–19:50." Then Open-Meteo for the dates within 16 days, and the sunset outlook.
+5. **Answer:** ranked spots, each with pose (lat, lon, height, heading, focal length), the next good dates and
+   minutes, weather outlook, **side by side: your photo | our render | the Vexcel oblique**, how sure we are
+   (match score, not vibes), and how to get there or get in (CoStar contact for rooftops). Each spot opens in
+   street view at that pose and time.
+
+#### The simulation as the agent's eyes: `render_view`
+- `POST /api/render {lat, lon, height_m, heading_deg, pitch_deg, fov_deg, time, w, h}` → PNG plus metadata.
+  It renders **the same three.js street view the user sees**, in headless Chrome on the server (we already
+  drive headless Edge over CDP for our map tests), so the agent sees exactly what the user will.
+- In LA/Houston: Vexcel 3D mesh or height map coloured by the ortho photo, with the sun and sky at that time.
+- Elsewhere: coarse, and labelled as coarse: terrain (free elevation tiles) plus OpenStreetMap building
+  footprints extruded to their heights, and the Esri photo as ground. Good enough to check a skyline or a
+  mountain ridge; the answer says "lower confidence (no Vexcel data here)".
+- Also `get_oblique` (real aerial photo looking toward the target) as a second, real-world view.
+
+#### Accuracy and precision: how we make sure it's right
+- **Tools own the numbers.** The final answer is assembled by the server from tool results; the model only
+  picks and explains. Any coordinate or time in the model's text that isn't from a tool is rejected.
+- **Show the evidence:** every spot shows the side-by-side and the match score, so the user can judge it.
+- **Says when it doesn't know:** a low score → "best guess, here's why"; no data → "outside our 3D area."
+- **Benchmark (do this early, keep it running):** ~20–30 photos in LA with a known place and time (Creative
+  Commons photos on Wikimedia or Flickr that have a geotag and timestamp; strip the EXIF before testing).
+  Measure the distance error (median metres), the heading error, the sun-time error (minutes), and whether the
+  right spot is in the top 3. Run **Gemini alone** against **Gemini plus our tools**. That gap is the pitch slide
+  that proves "not an LLM wrapper", and it's the number we try to improve.
+- Budgets: max ~25 tool calls and ~12 renders per question, so an answer takes about 1–2 minutes. Stream the
+  steps so the wait is visible and interesting (agentic depth is 30% of the CoStar score).
+
+#### Chat
+- One thread per uploaded photo. Threads and memory are stored (LangGraph checkpointer in MongoDB Atlas).
+  Follow-ups re-plan from the saved fingerprint and candidates instead of starting over.
+- The user can upload more photos ("more like this one"), and the agent learns their **taste** (prefers water,
+  rooftops, silhouettes) for future suggestions (Amazon's "adaptive").
+
+#### Pieces and owners (proposed; the contracts go in `docs/contracts.md` in their own small PR when we build them)
+| Piece | Where | Notes |
+|---|---|---|
+| `POST /api/match` (photo upload) → `{thread_id}`; `POST /api/match/{thread}` (chat message); `GET /api/match/{thread}/events` (SSE steps) | server (proxy) + `agent/` | Rust server stays the only public entry; it forwards to the agent |
+| `agent/` (Python, deepagents + langchain-google-genai) | new folder | Tools = HTTP calls to our Rust API |
+| `/api/render` | server + `web/` street view page | Headless Chrome on the server |
+| Skyline matching, sun inverse search | `crates/core` | Pure, unit-tested |
+| `vexcel::search_similar(text or image, area)` | `crates/vexcel` | Wraps `/v2/embedding/extract`, cached |
+
+#### Keys (Gemini)
+Get a key at https://aistudio.google.com/apikey and add two lines to **`env/.env`** (gitignored; don't paste the
+key in chat or commit it):
+```
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=the-model-id
+```
+Check the exact model ID, without printing the key: list the models with
+`curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models`.
+The agent passes the key explicitly to `ChatGoogleGenerativeAI(model=..., api_key=...)`.
 
 ### Phone budget (iPhone 13 Pro)
 - JSON responses < ~200 KB; heights as a separate u16 binary; photos ≤ 2048 px (default 1024); textures ≤ 4096.
@@ -125,20 +243,37 @@ does the sun drop behind neighbours, from which floor is it clear, and how many 
 per season? That lets brokers market "west-facing, sunset view until 19:58 in June", and tells real-estate photographers when to
 book **twilight shoots** of a listing. CoStar's judges ask "would someone switch this on Monday?": brokers and listing photographers would.
 
+**Photo match makes the CoStar story stronger:** it uses **Vexcel four ways** (image similarity search to find
+candidates, the height map to place the camera, obliques as real views, and the 3D mesh in the simulation)
+and **CoStar** to say whether the spot is a real roof you can get onto and who to ask. It is also clearly an
+agent that plans, acts, looks, and checks its own work.
+
 **Also going for:**
 - **Amazon, Best Practical AI:** fits as-is (agentic, real users, simple UX). They also score **adaptive**: the
-  agent should remember what the user liked (e.g. prefers "between towers", roofs, weekends). Must ship a working
-  demo, a clear target user, basic docs (README) and a pitch.
-- **Peri, Forward Deployed:** we must **consult a real business or club during the hackathon** and submit its
-  name, the person's name and role, and evidence (screenshot, photo, video or quote). It should be someone who
-  could use the app *now*, i.e. who shoots in **LA or Houston** (e.g. a real-estate photographer or brokerage
-  there, reached by phone/DM), or a Princeton photo/film club if we're open that their area isn't covered yet.
-  **Owner: TBD. Do this early**; their answers should shape what we build.
-- **LangChain, Best use of deepagents:** only if we build the agent with LangChain's `deepagents` (planning
-  to-do list, sub-agents, scratch files) calling our Rust API as tools. It also makes the agent visibly
-  "plan and act" for the CoStar judges. Cost: a small Python (or JS) agent service next to the Rust server.
-  **Decision needed.**
-- Not a fit: Arlequin (forensics / social networks), Physical AI (hardware).
+  agent remembers your taste from the photos you upload and the spots you save (water, rooftops, weekends).
+  Must ship a working demo, a clear target user, basic docs (README) and a pitch.
+- **LangChain, Best use of deepagents: yes.** The photo-match agent is a deep agent: Gemini as the model, our
+  Rust API as tools, sub-agents `reader`, `scout`, `surveyor`, `timer`; its to-do list and scratch files
+  (fingerprint, candidates, renders) are shown in the app. Setup: `pip install deepagents langchain-google-genai`,
+  then `create_deep_agent(model=ChatGoogleGenerativeAI(...), tools=[...], subagents=[...])`.
+- **MLH, Best Use of Gemini API:** Gemini is the agent's brain and its eyes: it reads the user's photo, uses
+  Google Search grounding for landmarks, and compares our renders with the photo. The benchmark (Gemini alone
+  vs Gemini plus our tools) is what to show.
+- **MLH, MongoDB Atlas:** chat threads and agent memory (LangGraph's MongoDB checkpointer), saved spots with a
+  **2dsphere geo index** ("spots near me"), and **Atlas Vector Search** over photo embeddings ("spots that look
+  like this photo", built from everyone's matches). One database for all three.
+- **MLH, Vultr:** host the Rust server, the agent and headless Chrome on a Vultr instance so judges can open it
+  on their phones. Stretch: a Vultr GPU for training Gaussian splats of demo spots.
+- **MLH, GoDaddy Registry:** register a domain for the demo. Needed anyway: **iPhone Safari only allows the
+  camera, photo library and location on HTTPS**, so the phone demo needs a real domain with a certificate
+  pointing at the Vultr box.
+- **MLH, DEV Writing Challenge:** a DEV post, "Giving an LLM eyes: geolocating a photo with a 3D simulation",
+  with the benchmark numbers. Cheap, and it doubles as the Devpost write-up.
+- **SpaceXSI (Cursor + Grok Bot raffle):** a raffle, only if someone on the team actually uses Cursor. No build work.
+- **Pick one database:** MongoDB Atlas (above) *or* Tiger Data (Postgres + pgvector + PostGIS, time series for
+  sun and weather). MongoDB fits better because of the ready-made LangGraph checkpointer.
+- **Not a fit:** Peri (dropped), Solana (nothing here needs a blockchain), Arlequin (forensics / social
+  networks), Physical AI (hardware).
 
 ## What we offer that PhotoPills doesn't
 PhotoPills already has sun lines, AR and alignment search ("Find"). Don't pitch those as new.
@@ -147,6 +282,8 @@ PhotoPills already has sun lines, AR and alignment search ("Find"). Don't pitch 
 3. **Preview from your desk:** a 3D skyline from the spot with the sun path, next to the real aerial photo.
 4. **Getting in:** CoStar roof height, floors, manager/leasing contact, and Matterport interiors.
 5. **An agent:** brief in, call sheet out (spots, times, backups, reasons).
+6. **Photo match:** upload someone else's photo, get the spot, the heading and the dates and minutes to retake it,
+   checked against a 3D render.
 
 ## Parts
 | Part | Folder | Owner | What it is |
