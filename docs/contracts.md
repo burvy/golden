@@ -174,8 +174,8 @@ On disk it is two files: a JSON meta and a raw little-endian `f32` file named by
 | `cell_m` | Cell size in **ground metres** (default 1.0). |
 | `width`, `height` | Cells per row, rows. |
 | `nodata` | Value of a cell with no data (`-9999`). Always check for it. |
-| `source.provider` | `"vexcel"` or `"synthetic"` (fixtures). |
-| `source.collection`, `captured_from`, `captured_to` | Which Vexcel flight, and when. `null` for synthetic. |
+| `source.provider` | `"vexcel"`, `"usgs-3dep"` (LiDAR backup outside Vexcel's area) or `"synthetic"` (fixtures). |
+| `source.collection`, `captured_from`, `captured_to` | Which Vexcel flight or USGS LiDAR project, and when (USGS: survey year only, `captured_to` null). `null` for synthetic. |
 | `source.native_res_m` | Finest source pixel used, ground metres, before downsampling (~0.062 in LA). |
 | data | `width * height` `f32` heights in metres. **Row-major, row 0 = north edge, column 0 = west edge.** |
 

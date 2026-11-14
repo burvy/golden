@@ -73,6 +73,24 @@ San Diego, Austin, rural Kansas and London return **403 Forbidden** (access, not
 imagery exists at Princeton is 403. Zoomed out, Vexcel tiles are black outside coverage, so we only show the
 Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on the basemap plus the Esri fallback photo; the bird's-eye photos,
 obliques, heights (and so "when do buildings hide the sun") work only in LA and Houston. The demo is in LA.
+**Heights now have a US-wide backup** (USGS LiDAR, next section), so horizons and "when do buildings hide the
+sun" also work in Princeton.
+
+### Heights outside LA/Houston: USGS 3DEP LiDAR (built 11/14, `crates/lidar`)
+- **Why LiDAR, not OpenStreetMap:** OSM building heights are patchy (most buildings have none) and its query
+  server failed twice in testing (406, 502). 3DEP is measured, covers most of the US, is public on AWS
+  (no key), and gives trees too, which matter as much as buildings for a sunset view.
+- **Checked before building:** Princeton is covered by `USGS_LPC_DE_DelawareValley_HD_2015_LAS_2017`
+  (41 billion points). Over Nassau Hall: 0.6 m point spacing at the deepest level, 99.6% of 1 m cells filled,
+  Nassau Hall's T shape and cupola, single trees and every roof are visible. No "building" class in this survey
+  (only ground / unclassified), which doesn't matter: a DSM keeps the highest return per cell.
+- **Same output as Vexcel:** `lidar::get_dsm(lat, lon, radius_m) -> DsmGrid`, provider `"usgs-3dep"`.
+  `server::heights::get_dsm` tries Vexcel and falls back to LiDAR on 403 / no key / mostly-empty grid, so
+  `core` and the endpoints don't change. Tested end to end: LiDAR grid → `core::horizon` at Princeton.
+- **Cost:** 150 m radius ≈ 20 MB, 6 s; 1 km radius ≈ 100 MB, 23 s the first time, then cached
+  (`cache/lidar/`). Full detail within 150 m, ~1 m points beyond.
+- **Limits:** surveys are years old (Princeton 2015: new buildings missing); heights are above sea level
+  (NAVD88), Vexcel's are on its own datum, so never mix the two in one grid.
 Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothing in the code changes.
 
 ### Street view (not tested yet; plan and risks)
@@ -164,9 +182,9 @@ sub-agents, scratch files), in a small Python service next to the Rust server.
   It renders **the same three.js street view the user sees**, in headless Chrome on the server (we already
   drive headless Edge over CDP for our map tests), so the agent sees exactly what the user will.
 - In LA/Houston: Vexcel 3D mesh or height map coloured by the ortho photo, with the sun and sky at that time.
-- Elsewhere: coarse, and labelled as coarse: terrain (free elevation tiles) plus OpenStreetMap building
-  footprints extruded to their heights, and the Esri photo as ground. Good enough to check a skyline or a
-  mountain ridge; the answer says "lower confidence (no Vexcel data here)".
+- Elsewhere in the US: the **USGS 3DEP LiDAR height map** (`crates/lidar`, ~0.5 m, real roofs and trees; see
+  "Heights outside LA/Houston") coloured by the Esri photo. Older (Princeton: 2015) and no obliques, so the
+  answer says "lower confidence (no Vexcel data here)". Outside the US: no 3D, map only.
 - Also `get_oblique` (real aerial photo looking toward the target) as a second, real-world view.
 
 #### Accuracy and precision: how we make sure it's right
@@ -314,7 +332,9 @@ times in ISO 8601 with offset; lat/lon WGS84 in the API; EPSG:3857 only inside `
 - Vexcel: `GET https://api.vexcelgroup.com/v2/dsm/extract?wkt=POINT(lon lat)&buffer-meter=N&srid=4326`,
   header `X-API-KEY`. Returns a GeoTIFF: 1 band, float32 metres, deflate, EPSG:3857. A 60 m box is 7.5 cm (2.5 MB).
   A 600 m box auto-drops to 15 cm (66 MB). So fetch small, cache on disk, downsample.
-- Works in LA (collection `us-ca-losangeles-2025`) and Houston. Princeton is geofenced (no data).
+- Works in LA (collection `us-ca-losangeles-2025`) and Houston. Princeton is geofenced (no data); there we use
+  USGS 3DEP LiDAR: index `https://usgs.entwine.io/boundaries/resources.geojson`, data
+  `https://s3-us-west-2.amazonaws.com/usgs-lidar-public/<project>/ept.json` (EPT octree of LAZ, EPSG:3857).
   Re-tested 11/14: our key gets 403 everywhere outside greater LA and greater Houston (see "Map: test results").
 - Map tiles: `/v2/ortho/tile?layer=urban,wide-area&zoom=z&tile-x=x&tile-y=y`, standard XYZ, z0–21, 256 px,
   JPEG (PNG at coverage edges). Full API spec (no key needed): https://api.vexcelgroup.com/v2/api-docs

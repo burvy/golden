@@ -32,7 +32,7 @@ pub struct DsmMeta {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DsmSource {
-    /// "vexcel" or "synthetic".
+    /// "vexcel", "usgs-3dep" (LiDAR backup) or "synthetic".
     pub provider: String,
     /// Vexcel collection, e.g. "n34w118-us-ca-losangeles-2026".
     pub collection: Option<String>,

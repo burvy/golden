@@ -8,6 +8,9 @@ description = "golden HTTP API on localhost:8787."
 [dependencies]
 golden-core = { path = "../core" }
 vexcel = { path = "../vexcel" }
+lidar = { path = "../lidar" }
+contracts = { path = "../contracts" }
+thiserror = "1"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 serde = { version = "1", features = ["derive"] }

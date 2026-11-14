@@ -20,6 +20,7 @@ use chrono::{NaiveDate, SecondsFormat};
 use golden_core::sun::{self, NoSunset};
 use serde::{Deserialize, Serialize};
 
+mod heights;
 mod tiles;
 
 const ADDR: &str = "127.0.0.1:8787";

@@ -1,0 +1,15 @@
+[package]
+name = "lidar"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Backup height map where Vexcel has no coverage: USGS 3DEP LiDAR point clouds (public, no key) to the same DsmGrid"
+
+[dependencies]
+contracts = { path = "../contracts" }
+las = { version = "0.11", features = ["laz"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1", features = ["fs", "time", "sync", "rt-multi-thread", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"

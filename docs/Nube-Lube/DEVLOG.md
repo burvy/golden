@@ -115,3 +115,18 @@
   and sun inverse search in `core`; Vexcel `/v2/embedding/extract` similarity search for candidates; benchmark of Gemini alone
   vs Gemini + tools on geotagged LA photos.
 - Gemini key goes in `env/.env` as `GEMINI_API_KEY` + `GEMINI_MODEL` (README rows added). Model ID not verified yet.
+
+11/14/26, night - Height map backup for Princeton: USGS 3DEP LiDAR (`crates/lidar`)
+- Task: time-boxed Vexcel backup for heights; must give the same `DsmGrid`. Checked data before building:
+  - 3DEP bare-earth DEM works but has no buildings (useless for a skyline on its own).
+  - OSM buildings with heights: Overpass failed (406, then 502). Patchy anyway.
+  - **3DEP LiDAR point clouds (EPT on AWS): Princeton covered** by DE_DelawareValley_HD_2015. Prototype in Python over
+    Nassau Hall: 36 tiles, 20 MB, 630k points, 99.6% of 1 m cells filled, buildings and trees clearly there. Chosen.
+- Built `crates/lidar`: pure `ept` (octree keys, walk plan), `index` (pick newest project covering a point), `grid`
+  (points -> max per cell, contract formula, noise dropped, pinholes filled); IO `fetch` (cache under `cache/lidar/`,
+  backoff on 429/5xx); `get_dsm` with full detail within 150 m, ~1 m points beyond. LAZ decode via the `las` crate.
+- Server: `heights::get_dsm` tries Vexcel, falls back to LiDAR on 403 / no key / mostly-empty. Unit tests for the
+  decision; live test: Princeton grid -> `core::horizon` works unchanged.
+- Measured: 1 km radius = 2000x2000 cells, 23 s cold, ~100 MB cached, 99.9% filled.
+- Docs: DESIGN (why LiDAR not OSM, numbers, limits), contracts (`provider: "usgs-3dep"`), README (crate, LIDAR_CACHE_DIR).
+- Next per plan: the agent (brief -> tools -> CallSheet, offline mock), then /api/photo and /api/scene.
