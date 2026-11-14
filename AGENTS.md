@@ -18,7 +18,7 @@ Read `DESIGN.md` and `docs/contracts.md` first.
 7. **Vexcel calls are rate-limited and big.** Cache every response on disk (`cache/`, gitignored). Back off on 429.
    Never fetch a whole city.
 8. **Git:** one branch per piece of work (`<part>/<what>`, e.g. `core/horizon`). Small commits that say why.
-   Open a PR to `main`; the coordinator (Boss) reviews and merges. Never push to `main` directly. No AI co-author lines.
+   Open a PR to `main`; the coordinator (Boss) reviews and merges. Never push to `main` directly.
 9. **When unsure**, stop and tell your human. Don't guess at a contract or another part's behaviour.
 
 ## Layout (target)
