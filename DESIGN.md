@@ -81,6 +81,22 @@ Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on Esri'
 obliques, heights (and so "when do buildings hide the sun") work only in LA and Houston. The demo is in LA.
 **Heights now have a US-wide backup** (USGS LiDAR, next section), so horizons and "when do buildings hide the
 sun" also work in Princeton.
+**Update 11/14 late: Vexcel now covers Princeton** (collection `n40w74-us-nj-trenton-2026`, flown June 2026): DSM,
+obliques and tiles all work there, so the Princeton demo uses Vexcel and LiDAR stays the backup elsewhere in the US.
+The far field of a height map is fetched at Vexcel `zoom=17` (~0.9 m, the same as our coarse level), which cut a 1 km
+grid from ~700 MB to ~56 MB.
+
+### Built and wired (11/14 late)
+- **Server** (`cargo run -p server`, :8787) serves `web/` and every endpoint in `docs/contracts.md`: sun, horizon, search,
+  scene (+bin), photo (+jpg), buildings, agent, Vexcel tiles. Heights: Vexcel, else USGS LiDAR, held in memory (4 grids).
+- **Agent** (`POST /api/agent`): read the brief (Gemini if `GEMINI_API_KEY`, else a rule reader) -> search (re-plans:
+  relaxes framing/standing, widens the area) -> sun path -> Vexcel oblique for the primary -> CoStar contacts -> write the
+  sheet (Gemini, with every time checked against the tools, else templates). `steps` lists what it did.
+- **Web** (`web/index.html`): the brief goes to the agent; spots, call sheet, skyline panorama, 3D view (scene ring 1,
+  4 m cells, ~1 km), Vexcel aerial photo and CoStar contacts all come from the server. The map draws Vexcel tiles,
+  Esri World Imagery where Vexcel has none. Each pane still falls back to sample data if its endpoint fails.
+  The intro hero builds its 3D city from `/api/scene` at the user's location (OpenStreetMap/Overpass removed).
+- Tested headless (iPhone 13 Pro size) at Princeton: brief -> 3 roof spots in ~15–20 s cold, everything live.
 
 ### Heights outside LA/Houston: USGS 3DEP LiDAR (built 11/14, `crates/lidar`)
 - **Why LiDAR, not OpenStreetMap:** OSM building heights are patchy (most buildings have none) and its query

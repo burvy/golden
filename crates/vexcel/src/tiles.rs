@@ -12,14 +12,22 @@ pub const EARTH_R: f64 = contracts::EARTH_R;
 /// Level 0 pixel size in 3857 units.
 pub const LEVEL0_SCALE: f64 = 2.0 * HALF_WORLD / (1u64 << 29) as f64;
 
+/// Far-field level: pixels 16x level 0 (~1.2 3857 units, ~0.9 m ground at 40° N), which is exactly
+/// a web-map zoom-17 pixel, so we ask Vexcel for it with `zoom=17` (`FAR_ZOOM`). A 2 km box costs ~16 MB
+/// this way instead of ~700 MB of level 1 tiles (measured at Princeton, 11/14).
+pub const FAR_LEVEL: u8 = 4;
+/// The `zoom` query parameter that makes Vexcel return `FAR_LEVEL` pixels.
+pub const FAR_ZOOM: u8 = 17;
+
 /// Pixels per tile side. Level 0 tiles are small (~63 m) so a spot fetches little.
 /// Level 1 tiles must be over 4096 px: if they were smaller, the same box at level 0
 /// would fit under Vexcel's ~8192 px limit and it would send us the finer (4x bigger) data.
+/// Far tiles are 2048 px: one web-map zoom-14 tile (~2.4 km of 3857 units).
 pub fn tile_px(level: u8) -> u32 {
-    if level == 0 {
-        1024
-    } else {
-        4608
+    match level {
+        0 => 1024,
+        FAR_LEVEL => 2048,
+        _ => 4608,
     }
 }
 

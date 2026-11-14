@@ -67,9 +67,9 @@ a{color:var(--teal)}
 <details style="margin-left:auto"><summary class="mute">API settings</summary><div class="row"><input id="base" value="http://localhost:8787" aria-label="API base URL" size="26"><button id="save">Use</button></div></details></header>
 <main>
 <div class="col">
-<section class="panel"><label for="brief">Shot brief</label>
-<textarea id="brief">Sun setting between two towers, from a rooftop</textarea>
-<div class="row"><input type="date" id="date" aria-label="Date" value="2026-06-20"><button class="go" id="find">Find spots</button></div></section>
+<section class="panel"><label for="brief">Shot brief</label><p class="note" style="margin:-2px 0 6px">Say the shot, the place and the day, e.g. “sunrise from the street in Downtown LA, late June”.</p>
+<textarea id="brief">Sun setting between two buildings, from a rooftop in Princeton, tonight</textarea>
+<div class="row"><input type="date" id="date" aria-label="Date (optional: the agent reads it from the brief)" title="Optional. Leave it and the agent reads the day from the brief."><button class="go" id="find">Find spots</button></div></section>
 <section class="panel" aria-live="polite"><div id="list"><div class="msg">Describe a shot to see ranked spots.</div></div></section>
 <section class="panel" id="sheet" hidden><h3>Call sheet</h3><div class="row"><button id="copy">Copy text</button></div><pre id="sheetText"></pre></section>
 </div>
@@ -79,32 +79,68 @@ a{color:var(--teal)}
 </div></main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-const $=s=>document.querySelector(s),rad=Math.PI/180,TZ='America/Los_Angeles';
-const BB={n:34.066,s:34.034,w:-118.272,e:-118.224};
+const $=s=>document.querySelector(s),rad=Math.PI/180;let TZ='America/Los_Angeles';
+/* BB: the map's box. AREA: where the server searched (from the call sheet); the map fits it. */
+let BB={n:34.066,s:34.034,w:-118.272,e:-118.224},AREA=null,DATE_SET=false;
 const clk=t=>new Date(t).toLocaleTimeString('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'});
-const CFG={base:$('#base').value},LIVE={};
+if(location.protocol.startsWith('http'))$('#base').value=location.origin; // served by the golden server: talk to it
+const CFG={base:$('#base').value.replace(/\/$/,'')},LIVE={};
 /* ---------- API layer: real server first, per-endpoint fallback to MOCK ---------- */
 async function call(ep,params,body){
- const qs=params?'?'+new URLSearchParams(params):'';
- try{const c=new AbortController(),to=setTimeout(()=>c.abort(),2500);
-  const r=await fetch(CFG.base+ep+qs,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:c.signal});
-  clearTimeout(to);if(!r.ok)throw new Error(r.status);const j=await r.json();LIVE[ep]=1;showApi();return j}
- catch(e){LIVE[ep]=0;showApi();return MOCK[ep](params||{},body)}}
+ try{const j=await REAL[ep](params||{},body);LIVE[ep]=1;showApi();return j}
+ catch(e){console.warn('golden: '+ep+' fell back to sample data:',e.message);LIVE[ep]=0;showApi();return MOCK[ep](params||{},body)}}
+/* One request to the golden server. Heights for a new area are downloaded on first use, so allow a long wait. */
+async function raw(ep,params,body,ms=90e3){const qs=params?'?'+new URLSearchParams(params):'',c=new AbortController(),to=setTimeout(()=>c.abort(),ms);
+ try{const r=await fetch(CFG.base+ep+qs,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:c.signal});
+  if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).error||m}catch(_){}throw new Error(m)}return r}finally{clearTimeout(to)}}
+const getJ=(ep,p,ms)=>raw(ep,p,null,ms).then(r=>r.json());
+/* ---------- adapters: contract shapes (docs/contracts.md) -> the shapes this page draws ---------- */
+const REAL={
+ async '/api/search'(_,b){const req={text:b.brief};if(b.date)req.date=b.date;
+  const sh=await raw('/api/agent',null,req,300e3).then(r=>r.json()),br=sh.brief;
+  TZ=br.tz;AREA=br.area;$('#date').value=br.date;
+  return{spots:sh.spots.map(spotUI),sun_path:[],call_sheet_text:sheetText(sh)}},
+ async '/api/sun'(p){return(await getJ('/api/sun',{lat:p.lat,lon:p.lon,date:p.date,tz:TZ,step_min:5})).points},
+ async '/api/spot/horizon'(p){const r=await getJ('/api/horizon',{lat:p.lat,lon:p.lon,above_m:1.7,radius_m:700,step_deg:1});return r.points.map(q=>({az_deg:q.az_deg,elev_deg:q.elev_deg}))},
+ async '/api/scene'(p){const m=await getJ('/api/scene',{lat:p.lat,lon:p.lon,radius_m:500,detail:'phone'}),buf=new DataView(await (await raw(m.data_url)).arrayBuffer());
+  // ring 1 (4 m cells, ~1 km across) shows the towers that matter; ring 0 alone is only ~250 m
+  const ring=m.rings.find(r=>r.cell_m>=2)||m.rings[m.rings.length-1],n=ring.width,hs=new Array(n*n);
+  for(let i=0;i<n*n;i++){const v=buf.getUint16(ring.byte_offset+i*2,true);hs[i]=v===m.nodata?0:v/10}
+  // the eye must clear the coarse cells it stands in (each keeps the tallest point under it), or walls fill the view
+  let near=0;for(let r=n/2-2;r<n/2+2;r++)for(let k=n/2-2;k<n/2+2;k++)near=Math.max(near,hs[r*n+k]);
+  return{n,cell_m:ring.cell_m,heights:hs,eye:p.eye_m?Math.max(+p.eye_m-m.base_m,near+2):null,attribution:m.attribution}},
+ async '/api/buildings'(p){const r=await getJ('/api/buildings',{lat:p.lat,lon:p.lon,radius_m:p.radius_m||150});
+  return r.buildings.map(b=>{const c=b.contacts[0];return{name:b.name||b.address||'Unnamed building',height_m:b.height_m,floors:b.floors??'?',
+   contact:c?[c.role,c.name||c.company,c.phone||c.email].filter(Boolean).join(' · '):'No contact listed',matterport_id:b.matterport[0]?.id||null}})}};
+/* A call-sheet spot as a list row. */
+function spotUI(x){const s=x.spot;return{id:`#${s.rank} ${s.standing==='roof'?'Roof':'Street'} · ${x.role}`,lat:s.lat,lon:s.lon,height_m:Math.round(s.ground_m),eye_m:s.eye_m,standing:s.standing,
+ score:s.score,sun_visible_until:s.sun.hidden_at||s.sun.flat_sunset,why:s.why.join('. '),arrive_by:x.arrive_by}}
+function sheetText(sh){const L=[sh.title,'',sh.summary,'','Timeline'];
+ for(const t of sh.timeline)L.push(`  ${clk(t.t)}  ${t.what}`);
+ L.push('','Spots');for(const x of sh.spots)L.push(`  ${x.role==='primary'?'Primary':'Backup'}: ${x.spot.lat.toFixed(5)}, ${x.spot.lon.toFixed(5)} (${x.spot.standing}). Arrive by ${clk(x.arrive_by)}.`,...x.notes.map(n=>'    '+n));
+ if(sh.access.length){L.push('','Access');for(const a of sh.access)L.push(`  ${a.building_name||a.building_id}: ${a.contact?[a.contact.name,a.contact.phone||a.contact.email].filter(Boolean).join(', '):'no CoStar contact'}`,`    Ask: ${a.ask}`)}
+ if(sh.caveats.length){L.push('','Caveats',...sh.caveats.map(c=>'  - '+c))}
+ if(sh.steps&&sh.steps.length){L.push('','What the agent did',...sh.steps.map(s=>`  ${s.tool}: ${s.summary}`))}
+ L.push('',`Written by: ${sh.model}`);return L.join('\n')}
 function showApi(){const m=Object.keys(LIVE).filter(k=>!LIVE[k]);$('#api').textContent=!Object.keys(LIVE).length?'':m.length?'Sample data for '+m.join(', '):'Connected to server'}
 /* ---------- helpers on contract shapes ---------- */
 function interp(path,ms){for(let i=1;i<path.length;i++){const a=path[i-1],b=path[i],ta=Date.parse(a.t),tb=Date.parse(b.t);if(ms<=tb){const f=Math.max(0,(ms-ta)/(tb-ta));return{az:a.az_deg+(b.az_deg-a.az_deg)*f,el:a.elev_deg+(b.elev_deg-a.elev_deg)*f}}}const l=path[path.length-1];return{az:l.az_deg,el:l.elev_deg}}
 function hzf(hz){const a=hz.slice().sort((x,y)=>x.az_deg-y.az_deg);return az=>{az=(az%360+360)%360;const j=a.findIndex(p=>p.az_deg>az),hi=j<0?a[0]:a[j],lo=j<=0?a[a.length-1]:a[j-1];let la=lo.az_deg,ha=hi.az_deg;if(la>az)la-=360;if(ha<az)ha+=360;return lo.elev_deg+(hi.elev_deg-lo.elev_deg)*(ha===la?0:(az-la)/(ha-la))}}
 function blockTime(path,hf,rise){const pk=path.reduce((m,p)=>p.elev_deg>m.elev_deg?p:m),pm=Date.parse(pk.t),t0=Date.parse(path[0].t),t1=Date.parse(path[path.length-1].t);
  for(let ms=rise?t0:pm;ms<=(rise?pm:t1);ms+=6e4){const p=interp(path,ms);if(rise?p.el>=hf(p.az):p.el<hf(p.az))return{ms,...p}}return null}
-const px=(lat,lon,W,H)=>[(lon-BB.w)/(BB.e-BB.w)*W,(BB.n-lat)/(BB.n-BB.s)*H];
+const mx=lon=>(lon+180)/360,my=lat=>(1-Math.log(Math.tan(Math.PI/4+lat*rad/2))/Math.PI)/2;
+const px=(lat,lon,W,H)=>[(mx(lon)-mx(BB.w))/(mx(BB.e)-mx(BB.w))*W,(my(lat)-my(BB.n))/(my(BB.s)-my(BB.n))*H];
+/* Fit BB to the searched area at the canvas's aspect ratio. */
+function fitBB(W,H){if(!AREA||!W||!H)return;const dLat=AREA.radius_m*1.25/111320,dLon=dLat*W/H/Math.cos(AREA.lat*rad);BB={n:AREA.lat+dLat,s:AREA.lat-dLat,w:AREA.lon-dLon,e:AREA.lon+dLon}}
 /* ---------- state ---------- */
 const S={spots:[],path:[],sheet:'',sel:null,d:{},tab:'h',t:0,tok:0,rise:false,busy:false,err:''};
 /* ---------- search ---------- */
-async function search(){const brief=$('#brief').value.trim();if(!brief)return;S.busy=true;S.err='';S.sel=null;$('#find').disabled=true;$('#list').innerHTML='<div class="msg">Searching…</div>';
+async function search(){const brief=$('#brief').value.trim();if(!brief)return;S.busy=true;S.err='';S.sel=null;$('#find').disabled=true;
+ const t0=Date.now(),say=()=>{$('#list').innerHTML=`<div class="msg">The agent is reading the brief, scoring spots and pulling photos… ${Math.round((Date.now()-t0)/1e3)} s<br><small>A new area downloads its heights first, which can take a minute.</small></div>`};say();const tick=setInterval(say,1000);
  S.rise=/sunrise|rising|dawn/i.test(brief);
- try{const r=await call('/api/search',null,{brief,date:$('#date').value,area:BB});S.spots=r.spots.slice().sort((a,b)=>b.score-a.score);S.path=r.sun_path;S.sheet=r.call_sheet_text||''}
+ try{const r=await call('/api/search',null,{brief,date:DATE_SET?$('#date').value:null,area:BB});S.spots=r.spots.slice().sort((a,b)=>b.score-a.score);S.path=r.sun_path;S.sheet=r.call_sheet_text||''}
  catch(e){S.spots=[];S.err='Search failed. Check the server and try again.'}
- S.busy=false;$('#find').disabled=false;$('#sheet').hidden=!S.sheet;$('#sheetText').textContent=S.sheet;renderList();drawMap();if(S.spots.length)select(S.spots[0])}
+ clearInterval(tick);S.busy=false;$('#find').disabled=false;$('#sheet').hidden=!S.sheet;$('#sheetText').textContent=S.sheet;renderList();drawMap();if(S.spots.length)select(S.spots[0])}
 function renderList(){const L=$('#list');if(S.err){L.innerHTML=`<div class="msg err">${S.err}</div>`;return}
  if(!S.spots.length){L.innerHTML='<div class="msg">No spots matched. Try a wider brief or another date.</div>';return}
  L.innerHTML=S.spots.map((s,i)=>`<button class="spot" data-i="${i}" aria-pressed="${S.sel&&S.sel.id===s.id}"><span class="sc">${Math.round(s.score*100)}</span><span><b>${s.id}</b> · ${s.height_m} m<small>Sun gone at ${clk(s.sun_visible_until)}</small><small>${s.why}</small></span></button>`).join('');
@@ -114,17 +150,29 @@ async function select(sp){const tok=++S.tok;S.sel=sp;S.d={};S.tab='h';renderList
  const date=$('#date').value,p={lat:sp.lat,lon:sp.lon},ok=f=>r=>{if(tok===S.tok){f(r);renderCard();drawMap()}},bad=k=>()=>{if(tok===S.tok){S.d[k]=false;renderCard()}};
  call('/api/sun',{...p,date}).then(ok(r=>{S.d.sun=r;const m=r.filter(x=>x.elev_deg>0);S.t=Date.parse(sp.sun_visible_until)-20*6e4;photo()})).catch(bad('sun'));
  call('/api/spot/horizon',{...p,height_m:sp.height_m}).then(ok(r=>S.d.hz=r)).catch(bad('hz'));
- call('/api/scene',{...p,radius_m:200}).then(ok(r=>S.d.scene=r)).catch(bad('scene'));
+ call('/api/scene',{...p,radius_m:200,eye_m:sp.eye_m||''}).then(ok(r=>S.d.scene=r)).catch(bad('scene'));
  call('/api/buildings',{...p,radius_m:150}).then(ok(r=>S.d.bld=r)).catch(bad('bld'))}
 function cross(){const d=S.d;if(!d.sun||!d.hz)return null;return blockTime(d.sun,hzf(d.hz),S.rise)}
 function photo(){}
-function photoUrl(az){const sp=S.sel;return `${CFG.base}/api/photo?lat=${sp.lat}&lon=${sp.lon}&az_deg=${Math.round(az)}`}
+/* Vexcel oblique looking toward the sun (PhotoMeta), one request per spot and direction. */
+const PH={};
+function photoFor(sp,az){const k=sp.lat+','+sp.lon+'@'+Math.round(az);return PH[k]||=getJ('/api/photo',{lat:sp.lat,lon:sp.lon,look_az_deg:Math.round(az),radius_m:150,max_px:1024})
+ .then(m=>({src:CFG.base+m.image_url,note:`${m.attribution}${m.captured?' · captured '+m.captured:''}${m.look_az_deg!=null?' · camera looks '+Math.round(m.look_az_deg)+'°':''}`}))}
 /* ---------- map ---------- */
 const cv=$('#map'),cx=cv.getContext('2d');let MW=0,MH=0;const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function rng(s){return()=>(s=(s*1664525+1013904223)>>>0)/4294967296}
+/* Real map: Vexcel aerial tiles through the server; Esri World Imagery where Vexcel has none (204) or there is no server. */
+const TILES={};let redraw=0;
+function tile(z,x,y){const k=z+'/'+x+'/'+y;if(TILES[k])return TILES[k];const im=new Image();
+ im.onload=()=>{im.ok=1;if(!redraw)redraw=requestAnimationFrame(()=>{redraw=0;drawMap()})};
+ im.onerror=()=>{if(im.esri)return;im.esri=1;im.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`};
+ im.src=`${CFG.base}/api/tiles/vexcel/${z}/${x}/${y}`;return TILES[k]=im}
+function drawTiles(W,H){const x0=mx(BB.w),x1=mx(BB.e),y0=my(BB.n),y1=my(BB.s),z=Math.max(0,Math.min(20,Math.ceil(Math.log2(W/(x1-x0)/256)))),N=2**z,sz=W/((x1-x0)*N);
+ for(let ty=Math.floor(y0*N);ty<=Math.floor(y1*N);ty++)for(let tx=Math.floor(x0*N);tx<=Math.floor(x1*N);tx++){const im=tile(z,tx,ty);if(im.ok)cx.drawImage(im,(tx/N-x0)/(x1-x0)*W,(ty/N-y0)/(y1-y0)*H,sz+.5,sz+.5)}
+ cx.fillStyle='rgba(10,12,20,.25)';cx.fillRect(0,0,W,H);
+ cx.font='11px sans-serif';cx.fillStyle='rgba(255,255,255,.85)';cx.fillText('Imagery © Vexcel Imaging · Esri, Maxar, Earthstar Geographics',8,H-8)}
 function drawMap(){const dpr=devicePixelRatio||1;MW=cv.clientWidth;MH=cv.clientHeight;cv.width=MW*dpr;cv.height=MH*dpr;cx.setTransform(dpr,0,0,dpr,0,0);
- cx.fillStyle=css('--bg');cx.fillRect(0,0,MW,MH);const r=rng(7),cw=MW/16,ch=MH/9;
- for(let i=0;i<16;i++)for(let j=0;j<9;j++){cx.fillStyle=r()>.55?css('--blk2'):css('--blk');cx.fillRect(i*cw+5+r()*3,j*ch+5+r()*3,cw-10-r()*6,ch-10-r()*5)}
+ fitBB(MW,MH);cx.fillStyle=css('--bg');cx.fillRect(0,0,MW,MH);drawTiles(MW,MH);
  const sun=css('--sun');
  for(const s of S.spots){const[X,Y]=px(s.lat,s.lon,MW,MH),R=8+s.score*20,g=cx.createRadialGradient(X,Y,0,X,Y,R*2);g.addColorStop(0,sun+(s.score>.6?'cc':'66'));g.addColorStop(1,sun+'00');cx.fillStyle=g;cx.beginPath();cx.arc(X,Y,R*2,0,7);cx.fill();cx.fillStyle=sun;cx.globalAlpha=.4+s.score*.6;cx.beginPath();cx.arc(X,Y,R*.4,0,7);cx.fill();cx.globalAlpha=1}
  const sp=S.sel;if(sp){const[X,Y]=px(sp.lat,sp.lon,MW,MH);cx.strokeStyle=css('--ink');cx.lineWidth=3;cx.beginPath();cx.arc(X,Y,9,0,7);cx.stroke();
@@ -137,7 +185,7 @@ function pano(c){const W=720,H=280,gy=H-24,sc=9,a0=c.az-40,X=a=>(a-a0)/80*W,Y=e=
  let sil=`M0 ${H}`;for(let x=0;x<=W;x+=2)sil+=`L${x} ${Y(hf(a0+x/W*80))}`;sil+=`L${W} ${H}Z`;const sx=X(sp.az),sy=Y(sp.el);
  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Skyline with the sun path"><defs><linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgb(${top})"/><stop offset="1" stop-color="rgb(${bot})"/></linearGradient><radialGradient id="gl"><stop offset="0" stop-color="#fff2c4" stop-opacity=".9"/><stop offset="1" stop-color="#ffb04a" stop-opacity="0"/></radialGradient></defs><rect width="${W}" height="${H}" fill="url(#sk)"/>${sp.el>-3?`<circle cx="${sx}" cy="${sy}" r="46" fill="url(#gl)"/><circle cx="${sx}" cy="${sy}" r="11" fill="#fff6d8"/>`:''}<path d="${path}" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="2" stroke-dasharray="5 5"/>${ticks}<path d="${sil}" fill="#1a1f2e"/><rect y="${gy}" width="${W}" height="24" fill="#0f121b"/><text x="10" y="${H-7}" fill="#9aa4ba" font-size="12">${Math.round(a0)}°</text><text x="${W/2-14}" y="${H-7}" fill="#9aa4ba" font-size="12">${Math.round(c.az)}°</text><text x="${W-40}" y="${H-7}" fill="#9aa4ba" font-size="12">${Math.round(a0+80)}°</text></svg>`}
 function renderCard(){const sp=S.sel,d=S.d;if(!sp){$('#card').innerHTML='<div class="msg">Pick a spot to see the view from there.</div>';return}
- const c=cross(),ready=d.sun&&d.hz;let head=`<div><h2>${sp.id}</h2><p class="mute" style="margin:2px 0 0">${sp.height_m} m up · ${sp.why}</p>`;
+ const c=cross(),ready=d.sun&&d.hz;let head=`<div><h2>${sp.id}</h2><p class="mute" style="margin:2px 0 0">${sp.standing?`Surface ${sp.height_m} m above sea level`:sp.height_m+' m up'}${sp.arrive_by?' · arrive by '+clk(sp.arrive_by):''} · ${sp.why}</p>`;
  if(c){const hf=hzf(d.hz),tw=hf(c.az)>1.5;head+=`<p style="margin:6px 0 0"><b>${S.rise?'Sun clears the buildings':tw?'Sun drops behind a tower':'Sun sets over open horizon'} at ${clk(c.ms)}</b></p>`}head+='</div>';
  const tabs=`<div class="row tabs" role="tablist" style="margin:0"><button role="tab" aria-selected="${S.tab==='h'}" data-t="h">Skyline</button><button role="tab" aria-selected="${S.tab==='3'}" data-t="3">3D view</button></div>`;
  let view;if(d.sun===false||d.hz===false)view='<div class="msg err">Could not load the sun path or skyline for this spot.</div>';else if(!ready||!c)view='<div class="msg" style="color:#fff">Loading skyline…</div>';else view=S.tab==='h'?pano(c):'<div id="v3"></div>';
@@ -146,7 +194,8 @@ function renderCard(){const sp=S.sel,d=S.d;if(!sp){$('#card').innerHTML='<div cl
  $('#card').innerHTML=head+tabs+`<div class="view">${view}</div>`+sl+`<div class="cols"><div><h3 style="margin-bottom:6px">Aerial view</h3><img id="photo" alt="Aerial photo looking toward the sun"><p class="note" id="pnote"></p></div><div><h3 style="margin-bottom:6px">Who to ask</h3>${bl}</div></div>`;
  document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;renderCard()});
  const tm=$('#tm');if(tm)tm.oninput=e=>{S.t=+e.target.value;document.querySelector('label[for=tm]').textContent='Time: '+clk(S.t);if(S.tab==='h'&&ready&&c)document.querySelector('.view').innerHTML=pano(c);else sun3D()};
- if(c){const im=$('#photo');im.onerror=()=>{im.onerror=null;im.src=MOCK.photo(c.az);$('#pnote').textContent='Sample image. The server photo is not available.'};im.src=photoUrl(c.az)}
+ if(c){const im=$('#photo'),fail=()=>{im.onerror=null;im.src=MOCK.photo(c.az);$('#pnote').textContent='Sample image. No Vexcel aerial photo for this spot.'};
+  photoFor(sp,c.az).then(m=>{if(S.sel!==sp)return;im.onerror=fail;im.src=m.src;$('#pnote').textContent=m.note}).catch(()=>{if(S.sel===sp)fail()})}
  if(S.tab==='3'&&ready&&d.scene)build3D(c);else if(S.tab==='3'&&d.scene===false)document.querySelector('.view').innerHTML='<div class="msg err">Could not load the 3D scene.</div>'}
 /* ---------- 3D: x = east, y = up, z = south. grid: row-major, row 0 north, col 0 west, centred on the spot ---------- */
 const V=(az,el,r)=>new THREE.Vector3(Math.sin(az*rad)*Math.cos(el*rad)*r,Math.sin(el*rad)*r,-Math.cos(az*rad)*Math.cos(el*rad)*r);
@@ -159,7 +208,7 @@ function build3D(c){const host=$('#v3'),sc=S.d.scene,sp=S.sel;if(!host||!sc)retu
  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));g.computeVertexNormals();s.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true})));
  const pts=S.d.sun.filter(p=>p.elev_deg>0).map(p=>V(p.az_deg,p.elev_deg,900));s.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xffffff})));
  T.sun=new THREE.Mesh(new THREE.SphereGeometry(26,16,16),new THREE.MeshBasicMaterial({color:0xfff2c4}));s.add(T.sun);T.dl=new THREE.DirectionalLight(0xffd9a0,1);s.add(T.dl,new THREE.AmbientLight(0x8890a8,.7));
- T.s=s;T.yaw=c.az;T.cam.position.set(0,sp.height_m+2,0);sun3D();
+ T.s=s;T.yaw=c.az;T.cam.position.set(0,sc.eye??sp.height_m+2,0);sun3D();
  const el=T.r.domElement;let drag=null;el.onpointerdown=e=>{drag=e.clientX;el.setPointerCapture(e.pointerId)};el.onpointerup=()=>drag=null;el.onpointermove=e=>{if(drag===null)return;T.yaw-=(e.clientX-drag)*.25;drag=e.clientX;sun3D()}}
 function sun3D(){if(!T||!T.s||!S.d.sun)return;const p=interp(S.d.sun,S.t),v=V(p.az,Math.max(p.el,-5),900);T.sun.position.copy(v);T.sun.visible=p.el>-3;T.dl.position.copy(v);T.dl.intensity=Math.max(.1,Math.min(1.2,p.el/12+.3));
  const t=Math.max(0,Math.min(1,(p.el+4)/22)),a=mix([60,40,90],[84,140,200],t);T.s.background=new THREE.Color(`rgb(${a})`);
@@ -177,12 +226,12 @@ function sunAt(date,min,lat,lon){const[Y,M,D]=date.split('-').map(Number),n=Math
 function sunPath(date,lat,lon){const o=[];for(let m=0;m<1440;m+=5){const p=sunAt(date,m,lat,lon);if(p.el>-6)o.push({t:iso(date,m),az_deg:+p.az.toFixed(2),elev_deg:+p.el.toFixed(2)})}return o}
 function horizon(s){return Array.from({length:360},(_,a)=>({az_deg:a,elev_deg:+prof(s,a).toFixed(2)}))}
 const MOCK={
- async '/api/search'(_,b){const q=b.brief.toLowerCase(),rise=/sunrise|dawn/.test(q),res=SP.map(s=>{const p=sunPath(b.date,s.lat,s.lon),c=blockTime(p,hzf(horizon(s)),rise);let sc=.35,why=[];
+ async '/api/search'(_,b){AREA=null;BB={n:34.066,s:34.034,w:-118.272,e:-118.224};b={...b,date:b.date||new Date().toISOString().slice(0,10)};$('#date').value=b.date;const q=b.brief.toLowerCase(),rise=/sunrise|dawn/.test(q),res=SP.map(s=>{const p=sunPath(b.date,s.lat,s.lon),c=blockTime(p,hzf(horizon(s)),rise);let sc=.35,why=[];
   const gap=s.gap&&c&&Math.abs(c.az-s.gap[0])<s.gap[1]-.4;if(/roof/.test(q)&&s.type==='rooftop'){sc+=.15;why.push('rooftop')}if(/street|ground/.test(q)&&s.type==='street'){sc+=.15;why.push('street level')}if(/bridge/.test(q)&&s.type==='bridge'){sc+=.15;why.push('bridge')}
   if(gap){sc+=/between|gap|framed/.test(q)?.32:.12;why.push('the sun sets in the gap between two towers')}else if(/between/.test(q))sc-=.08;sc+=Math.min(.08,s.h/640);
   return{id:s.id,lat:s.lat,lon:s.lon,height_m:s.h,score:+Math.max(.05,Math.min(.99,sc)).toFixed(2),sun_visible_until:c?iso(b.date,Math.round((c.ms-Date.parse(iso(b.date,0)))/6e4)):iso(b.date,1080),why:(why.length?why.join(', '):'open horizon')[0].toUpperCase()+(why.length?why.join(', '):'open horizon').slice(1)+'.'}}).sort((a,b)=>b.score-a.score).slice(0,6);
   const top=res[0];return{spots:res,sun_path:sunPath(b.date,top.lat,top.lon),call_sheet_text:`Shoot date ${b.date}\nBrief: ${b.brief}\n\n`+res.slice(0,3).map((s,i)=>`${i?'Backup':'Primary'}: ${s.id}\n  Sun gone at ${clk(s.sun_visible_until)}. ${s.why}`).join('\n\n')+'\n\n(Sample data)'}},
- async '/api/sun'(p){return sunPath(p.date,+p.lat,+p.lon)},
+ async '/api/sun'(p){return sunPath(p.date||new Date().toISOString().slice(0,10),+p.lat,+p.lon)},
  async '/api/spot/horizon'(p){return horizon(near(+p.lat,+p.lon))},
  async '/api/scene'(p){const s=near(+p.lat,+p.lon),cell=4,n=Math.min(121,Math.floor(2*(+p.radius_m||200)/cell)+1),c=(n-1)/2,hs=new Array(n*n).fill(0);
   for(const t of s.t){const d=70+(t.c*13)%110,bx=Math.sin(t.c*rad)*d/cell+c,bz=-Math.cos(t.c*rad)*d/cell+c,hw=(d*Math.tan(t.w*rad)+5)/cell,H=s.h+Math.tan(t.e*rad)*d;for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(Math.abs(j-bx)<hw&&Math.abs(i-bz)<hw)hs[i*n+j]=Math.max(hs[i*n+j],+H.toFixed(1))}
@@ -192,7 +241,7 @@ const MOCK={
  photo(az){const c=document.createElement('canvas');c.width=480;c.height=300;const x=c.getContext('2d'),g=x.createLinearGradient(0,0,0,300);g.addColorStop(0,'#5a3f7a');g.addColorStop(1,'#f5905a');x.fillStyle=g;x.fillRect(0,0,480,300);x.fillStyle='#232a3c';const r=rng(Math.round(az));for(let i=0;i<14;i++){const w=20+r()*40,h=40+r()*150;x.fillRect(i*36,300-h,w,h)}x.fillStyle='#fff';x.font='13px sans-serif';x.fillText('Sample view toward '+Math.round(az)+'°',12,22);return c.toDataURL()}};
 /* Live 3D homepage loaded separately; frontend-only implementation. */
 /* ---------- wire up ---------- */
-$('#find').onclick=search;$('#save').onclick=()=>{CFG.base=$('#base').value.replace(/\/$/,'');for(const k in LIVE)delete LIVE[k];showApi();search()};
+$('#find').onclick=search;$('#date').onchange=()=>DATE_SET=!!$('#date').value;$('#save').onclick=()=>{CFG.base=$('#base').value.replace(/\/$/,'');for(const k in LIVE)delete LIVE[k];showApi();search()};
 $('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(S.sheet);e.target.textContent='Copied'}catch(_){e.target.textContent='Select the text to copy'}setTimeout(()=>e.target.textContent='Copy text',1500)};
 addEventListener('resize',drawMap);search();
 </script>

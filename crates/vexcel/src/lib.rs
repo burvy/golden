@@ -10,8 +10,9 @@
 //!
 //! How it fetches (numbers measured on the live API, see docs/Nube-Lube/DEVLOG.md):
 //! - Near the point (`near_radius_m`, default 150 m): level 0 tiles, 1024 px of ~6 cm (~63 m per tile, ~3 MB).
-//! - Further out: level 1 tiles, 4608 px of ~12 cm (~570 m per tile). At 1 m output cells the far
-//!   field loses nothing, and it costs 4x fewer bytes than level 0 for the same area.
+//! - Further out: `FAR_LEVEL` tiles, 2048 px of ~0.9 m (~1.9 km per tile at 40° N), fetched with Vexcel's
+//!   `zoom=17`. At 1 m output cells that's all a skyline needs, and a 2 km box is ~16 MB instead of the
+//!   ~700 MB the old 12 cm level 1 tiles cost.
 //! - Every tile is cached under `cache/vexcel/dsm/`, so a second call for the same area makes no requests.
 
 pub mod auth;
@@ -63,7 +64,7 @@ pub enum Error {
 pub struct DsmOptions {
     /// Output cell size in ground metres.
     pub cell_m: f64,
-    /// Within this radius use the finest (~6 cm) data; beyond it, ~12 cm.
+    /// Within this radius use the finest (~6 cm) data; beyond it, ~0.9 m.
     pub near_radius_m: f64,
     /// Parallel requests to Vexcel.
     pub max_concurrency: usize,
@@ -94,13 +95,13 @@ pub async fn get_dsm_with(lat: f64, lon: f64, radius_m: f64, opts: &DsmOptions) 
         .map_err(|e| Error::BadData(format!("grid build panicked: {e}")))?
 }
 
-/// Which tiles to fetch: level 0 near the point, level 1 for the rest (if any).
+/// Which tiles to fetch: level 0 near the point, `FAR_LEVEL` for the rest (if any).
 pub fn plan_tiles(lat: f64, lon: f64, radius_m: f64, near_radius_m: f64) -> Vec<TileId> {
     // half a metre of margin so edge cells get every source pixel
     let near = radius_m.min(near_radius_m) + 0.5;
     let mut out = tiles::tiles_covering(0, tiles::ground_box(lat, lon, near));
     if radius_m > near_radius_m {
-        out.extend(tiles::tiles_covering(1, tiles::ground_box(lat, lon, radius_m + 0.5)));
+        out.extend(tiles::tiles_covering(tiles::FAR_LEVEL, tiles::ground_box(lat, lon, radius_m + 0.5)));
     }
     out
 }
@@ -183,8 +184,8 @@ mod tests {
     #[test]
     fn large_radius_adds_coarse_tiles() {
         let t = plan_tiles(34.049, -118.251, 1000.0, 150.0);
-        let coarse = t.iter().filter(|t| t.level == 1).count();
-        assert!(coarse >= 4 && coarse <= 25, "{coarse} coarse tiles");
+        let coarse = t.iter().filter(|t| t.level == tiles::FAR_LEVEL).count();
+        assert!((1..=4).contains(&coarse), "{coarse} coarse tiles");
         assert!(t.iter().filter(|t| t.level == 0).count() <= 49);
     }
 

@@ -33,6 +33,17 @@ pub struct CallSheet {
     pub caveats: Vec<String>,
     /// Model id, or "mock".
     pub model: String,
+    /// What the agent did, in order, so the app can show its work. May be empty.
+    #[serde(default)]
+    pub steps: Vec<AgentStep>,
+}
+
+/// One thing the agent did: which tool (or "read" / "plan" / "write") and what came of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentStep {
+    pub tool: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
