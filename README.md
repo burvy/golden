@@ -12,17 +12,17 @@ HackPrinceton Fall 2026 Entertainment track - CoStar "AI for the Built World"
 
 ## Run it
 
-**Prerequisites:** Rust (stable) <!--TODO Ray: Version-->, Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
+**Prerequisites:** Rust 1.85+ (edition 2024), Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
 
 ```powershell
-.\build.ps1 # builds everything  <!-- TODO Ray: what is "everything" -->
+.\build.ps1 # release build of core + server (and web/ once it exists); add -Test to also run tests
 .\run.ps1 # starts the server
 ```
 Then open http://localhost:8787.
 
 Without the scripts (any OS):
 ```sh
-cargo run -p server # TODO Ray: confirm
+cargo run --release -p server
 ```
 
 ## Test
