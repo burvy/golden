@@ -4,6 +4,9 @@ You're an AI coding agent working for one of four teammates. Each teammate owns 
 Read `DESIGN.md` and `docs/contracts.md` first.
 
 ## Rules
+
+ENSURE THE HUMAN UNDERSTANDS WHAT YOU ARE BUILDING
+
 1. **Stay in your part's folder.** Need something from another part? Use its fixture in `fixtures/`, or ask your
    human to raise it with the owner. Don't edit their code.
 2. **Contracts are shared.** Don't change a shape in `docs/contracts.md` inside a feature PR. Propose it in a
@@ -13,7 +16,7 @@ Read `DESIGN.md` and `docs/contracts.md` first.
 4. **Test what you build.** `core` needs unit tests (e.g. sun vs a known sunset time, horizon on a synthetic wall).
    Run `cargo test --workspace` (and `npm run build` in `web/` if you touched it) before you push.
 5. **Secrets.** The Vexcel key comes from the `VEXCEL_API_KEY` env var (or a path in `VEXCEL_ENV_FILE`). Never print,
-   log or commit it. The Claude key comes from `ANTHROPIC_API_KEY`. Without it the agent runs on the offline mock.
+   log or commit it. Never commit secret keys
 6. **No CoStar data in git.** The kit path comes from `COSTAR_KIT_DIR`. Small hand-made fixtures are fine.
 7. **Vexcel calls are rate-limited and big.** Cache every response on disk (`cache/`, gitignored). Back off on 429.
    Never fetch a whole city.
