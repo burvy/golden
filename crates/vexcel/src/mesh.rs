@@ -40,7 +40,9 @@ pub fn cache_path(root: &Path, kind: &str, query: &str) -> PathBuf {
 }
 
 /// One mesh response, from the disk cache or Vexcel (with backoff on 429/5xx). JSON comes back rewritten.
-pub async fn get(http: &reqwest::Client, key: &ApiKey, root: &Path, kind: &str, query: &str, proxy_prefix: &str) -> Result<Vec<u8>, Error> {
+/// The key is only needed on a cache miss, so a server without one still serves everything already cached
+/// (the demo areas after the key expires); a miss without a key is `Error::NoKey`.
+pub async fn get(http: &reqwest::Client, key: Option<&ApiKey>, root: &Path, kind: &str, query: &str, proxy_prefix: &str) -> Result<Vec<u8>, Error> {
     if !allowed(kind) {
         return Err(Error::BadData(format!("not a mesh resource: {kind}")));
     }
@@ -48,6 +50,7 @@ pub async fn get(http: &reqwest::Client, key: &ApiKey, root: &Path, kind: &str, 
     let raw = match std::fs::read(&path) {
         Ok(b) => b,
         Err(_) => {
+            let key = key.ok_or(Error::NoKey)?;
             let url = if query.is_empty() { format!("{MESH_URL}{kind}") } else { format!("{MESH_URL}{kind}?{query}") };
             let b = get_bytes(http, key, &url, &[]).await?;
             if let Some(dir) = path.parent() {
@@ -126,6 +129,20 @@ fn fnv1a(b: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cached_responses_need_no_key() {
+        let root = std::env::temp_dir().join(format!("golden-mesh-test-{}", std::process::id()));
+        let path = cache_path(&root, "tileset", "collection=x");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, br#"{"uri":"./tile?zoom=14"}"#).unwrap();
+        let http = reqwest::Client::new();
+        let hit = get(&http, None, &root, "tileset", "collection=x", "/api/mesh/").await.unwrap();
+        assert_eq!(hit, br#"{"uri":"./tile.glb?zoom=14"}"#);
+        let miss = get(&http, None, &root, "tile", "zoom=20", "/api/mesh/").await;
+        assert!(matches!(miss, Err(Error::NoKey)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn absolute_child_urls_go_through_the_proxy() {

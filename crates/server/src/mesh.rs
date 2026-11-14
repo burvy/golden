@@ -50,7 +50,8 @@ struct AtQ {
 
 async fn at(State(st): State<Arc<Mesh>>, q: Result<Query<AtQ>, axum::extract::rejection::QueryRejection>) -> Result<Response, ApiErr> {
     let Query(q) = q.map_err(|e| ApiErr(StatusCode::BAD_REQUEST, e.body_text()))?;
-    let key = st.key.as_ref().ok_or_else(|| ApiErr(StatusCode::NOT_FOUND, "no Vexcel key: no 3D mesh".into()))?;
+    // no key: coverage comes from the disk cache if it was fetched before (cache-only demo), else 503 below
+    let key = st.key.as_ref();
     let fc = st
         .collections
         .get_or_try_init(|| async {
@@ -58,7 +59,10 @@ async fn at(State(st): State<Arc<Mesh>>, q: Result<Query<AtQ>, axum::extract::re
             serde_json::from_slice(&b).map_err(|e| vexcel::Error::BadData(e.to_string()))
         })
         .await
-        .map_err(|e| ApiErr(StatusCode::BAD_GATEWAY, format!("Vexcel 3D coverage: {e}")))?;
+        .map_err(|e| match e {
+            vexcel::Error::NoKey => ApiErr(StatusCode::SERVICE_UNAVAILABLE, "no Vexcel key and no cached 3D coverage".into()),
+            e => ApiErr(StatusCode::BAD_GATEWAY, format!("Vexcel 3D coverage: {e}")),
+        })?;
     let Some(c) = vexcel::mesh::covering(fc, q.lat, q.lon) else {
         return Err(ApiErr(StatusCode::NOT_FOUND, "Vexcel has no 3D mesh here".into()));
     };
@@ -87,7 +91,7 @@ async fn serve(st: &Mesh, kind: &str, q: Option<String>, near: Option<(f64, f64,
     if !vexcel::mesh::allowed(&kind) || kind == "collections" {
         return Err(ApiErr(StatusCode::NOT_FOUND, format!("unknown mesh resource {kind:?}")));
     }
-    let key = st.key.as_ref().ok_or_else(|| ApiErr(StatusCode::NOT_FOUND, "no Vexcel key".into()))?;
+    let key = st.key.as_ref(); // only needed for what is not cached yet
     let q = q.unwrap_or_default();
     let prefix = match near {
         Some((lat, lon, r)) => format!("{PREFIX}near/{lat}/{lon}/{r}/"),
@@ -95,6 +99,7 @@ async fn serve(st: &Mesh, kind: &str, q: Option<String>, near: Option<(f64, f64,
     };
     let body = vexcel::mesh::get(&st.app.http, key, &st.app.cache_root, &kind, &q, &prefix).await.map_err(|e| match e {
         vexcel::Error::Api { status: 404, .. } => ApiErr(StatusCode::NOT_FOUND, "no such mesh tile".into()),
+        vexcel::Error::NoKey => ApiErr(StatusCode::SERVICE_UNAVAILABLE, "mesh tile not cached and no Vexcel key".into()),
         e => {
             eprintln!("vexcel mesh {kind}: {e}");
             ApiErr(StatusCode::BAD_GATEWAY, "Vexcel mesh fetch failed".into())
