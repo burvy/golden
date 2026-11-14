@@ -67,12 +67,17 @@ struct Place {
 pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result<CallSheet, ApiErr> {
     let llm = Claude::from_env(&st.http);
     let mut log = Log::default();
+    let clock = std::time::Instant::now();
+    let mut split: Vec<(&str, u128)> = Vec::new();
+    let lap = |name, split: &mut Vec<(&str, u128)>| split.push((name, clock.elapsed().as_millis()));
 
     // 1. read
     let (brief, place) = read_brief(st, &req, now, llm.as_ref(), &mut log).await?;
+    lap("read", &mut split);
 
     // 2. search, re-planning if nothing fits
     let (result, notes) = search_with_replan(st, brief, &place.name, &mut log).await?;
+    lap("search", &mut split);
     let brief = result.brief.clone();
     let date = api::parse_date(&brief.date)?;
     let zone = tz::parse(&brief.tz).map_err(ApiErr::bad)?;
@@ -148,6 +153,8 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
         });
     }
 
+    lap("tools", &mut split);
+
     // 4. assemble, then write the words
     let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, costar, notes);
     let mut model = "mock".to_string();
@@ -164,6 +171,8 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
         log.add("write", "Wrote the sheet from templates (no ANTHROPIC_API_KEY: offline mock)");
         sheet.caveats.push("Written by the offline mock (no Claude key yet): the wording is templated; all numbers come from the tools.".into());
     }
+    lap("write", &mut split);
+    eprintln!("agent: {}", split.iter().map(|(n, ms)| format!("{n} @{ms} ms")).collect::<Vec<_>>().join(", "));
     sheet.model = model;
     sheet.steps = log.0;
     Ok(sheet)
