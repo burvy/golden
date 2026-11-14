@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>golden: map prototype</title>
+<!-- Prototype only (spike for DESIGN.md "Map"): the real app lives in web/. -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; font: 15px -apple-system, system-ui, sans-serif; color: #fff; }
+  #map { position: absolute; inset: 0; }
+  #shade { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #panel {
+    box-sizing: border-box;
+    position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    background: rgba(20, 20, 28, 0.82); border-radius: 16px; padding: 12px 16px 14px;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  #row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  #time { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #phase { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: #333; }
+  #info { font-size: 13px; opacity: 0.8; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  input[type=range] { box-sizing: border-box; width: 100%; margin: 12px 0 0; height: 32px; accent-color: #ff9a3c; }
+  #ticks { display: flex; justify-content: space-between; font-size: 11px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<canvas id="shade"></canvas>
+<div id="panel">
+  <div id="row"><span id="time">--:--</span><span id="phase">-</span></div>
+  <div id="info">-</div>
+  <input id="slider" type="range" min="0" max="144" step="1" value="0" aria-label="Hours from now">
+  <div id="ticks"><span>now</span><span>+6 h</span><span>+12 h</span><span>+18 h</span><span>+24 h</span></div>
+</div>
+<script>
+// ---------- sun position (NOAA solar calculator formulas, same as crates/core/src/sun.rs) ----------
+const RAD = Math.PI / 180;
+
+// Parts that depend only on the time: declination (rad) and equation of time (minutes).
+function sunState(ms) {
+  const jd = ms / 86400000 + 2440587.5, T = (jd - 2451545) / 36525;
+  const L0 = (280.46646 + T * (36000.76983 + T * 0.0003032)) % 360;
+  const M = 357.52911 + T * (35999.05029 - 0.0001537 * T);
+  const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T);
+  const C = Math.sin(M * RAD) * (1.914602 - T * (0.004817 + 0.000014 * T))
+          + Math.sin(2 * M * RAD) * (0.019993 - 0.000101 * T) + Math.sin(3 * M * RAD) * 0.000289;
+  const omega = 125.04 - 1934.136 * T;
+  const lambda = L0 + C - 0.00569 - 0.00478 * Math.sin(omega * RAD);
+  const eps0 = 23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60;
+  const eps = eps0 + 0.00256 * Math.cos(omega * RAD);
+  const decl = Math.asin(Math.sin(eps * RAD) * Math.sin(lambda * RAD));
+  const y = Math.tan(eps * RAD / 2) ** 2;
+  const eqTime = 4 / RAD * (y * Math.sin(2 * L0 * RAD) - 2 * e * Math.sin(M * RAD)
+    + 4 * e * y * Math.sin(M * RAD) * Math.cos(2 * L0 * RAD)
+    - 0.5 * y * y * Math.sin(4 * L0 * RAD) - 1.25 * e * e * Math.sin(2 * M * RAD));
+  const utcMin = ((ms / 60000) % 1440 + 1440) % 1440;
+  return { decl, eqTime, utcMin };
+}
+
+// Elevation and azimuth (degrees) at a place, given sunState(ms).
+function sunAt(s, lat, lon) {
+  const tst = ((s.utcMin + s.eqTime + 4 * lon) % 1440 + 1440) % 1440;
+  const ha = (tst / 4 - 180) * RAD, la = lat * RAD;
+  const cosZ = Math.sin(la) * Math.sin(s.decl) + Math.cos(la) * Math.cos(s.decl) * Math.cos(ha);
+  const el = 90 - Math.acos(Math.max(-1, Math.min(1, cosZ))) / RAD;
+  const az = (Math.atan2(Math.sin(ha), Math.cos(ha) * Math.sin(la) - Math.tan(s.decl) * Math.cos(la)) / RAD + 180 + 360) % 360;
+  return { el, az };
+}
+
+// Next sunset after ms (2-minute steps, up to 26 h): { ms, az } or null.
+function nextSunset(ms, lat, lon) {
+  let prev = sunAt(sunState(ms), lat, lon).el;
+  for (let t = ms + 120000; t <= ms + 26 * 3600000; t += 120000) {
+    const p = sunAt(sunState(t), lat, lon);
+    if (prev >= -0.833 && p.el < -0.833) return { ms: t, az: p.az };
+    prev = p.el;
+  }
+  return null;
+}
+
+// ---------- shading: sun elevation -> overlay colour ----------
+const lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+const mix = (c1, c2, t) => c1.map((v, i) => lerp(v, c2[i], t));
+const WARM = [255, 140, 40, 0.0], GOLD = [255, 130, 40, 0.20], DUSK = [40, 50, 130, 0.45], NIGHT = [6, 10, 36, 0.72];
+function shade(el) {
+  if (el >= 8) return WARM;                                  // day: no overlay
+  if (el >= 0) return mix(GOLD, WARM, el / 8);               // golden hour: warm tint
+  if (el >= -6) return mix(GOLD, DUSK, -el / 6);             // civil twilight (blue hour)
+  if (el >= -18) return mix(DUSK, NIGHT, (-el - 6) / 12);    // nautical + astronomical twilight
+  return NIGHT;
+}
+function phaseOf(el) {
+  if (el >= 6) return ['Day', '#3a6'];
+  if (el >= -4) return ['Golden hour', '#c70'];
+  if (el >= -6) return ['Blue hour', '#36a'];
+  if (el >= -18) return ['Twilight', '#235'];
+  return ['Night', '#222'];
+}
+
+// ---------- map ----------
+const q = new URLSearchParams(location.search);
+const start = { lat: +(q.get('lat') ?? 34.0490), lon: +(q.get('lon') ?? -118.2510), z: +(q.get('z') ?? 15) };
+const tz = q.get('tz') || undefined; // IANA zone of the place; the real app gets it from the server
+const t0 = q.get('t0') ? Date.parse(q.get('t0')) : Math.floor(Date.now() / 600000) * 600000;
+const slider = document.getElementById('slider');
+slider.value = Math.round(+(q.get('h') ?? 0) * 6);
+const timeMs = () => t0 + slider.value * 600000;
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://tiles.openfreemap.org/styles/liberty',
+  center: [start.lon, start.lat], zoom: start.z, attributionControl: { compact: true },
+});
+map.on('load', () => {
+  map.addSource('vexcel', {
+    type: 'raster', tiles: [location.origin + '/api/tiles/vexcel/{z}/{x}/{y}'], tileSize: 256,
+    minzoom: 12, maxzoom: 21, attribution: 'Imagery © Vexcel Imaging US, Inc.',
+  });
+  // Under the labels, over the basemap fill. Below z12 Vexcel's tiles are mostly black padding.
+  // The basemap's own buildings (flat and 3D blocks) would cover the real photo: hide them.
+  for (const l of map.getStyle().layers) if (l.id.includes('building')) map.setLayoutProperty(l.id, 'visibility', 'none');
+  const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
+  map.addLayer({ id: 'vexcel', type: 'raster', source: 'vexcel', minzoom: 12 }, firstSymbol);
+  map.addSource('sunlines', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addLayer({ id: 'sunset-line', type: 'line', source: 'sunlines', filter: ['==', ['get', 'kind'], 'sunset'],
+    paint: { 'line-color': '#ff7a1a', 'line-width': 4, 'line-dasharray': [2, 1.5] } });
+  map.addLayer({ id: 'sun-line', type: 'line', source: 'sunlines', filter: ['==', ['get', 'kind'], 'sun'],
+    paint: { 'line-color': '#ffd23c', 'line-width': 4 } });
+  update();
+});
+map.on('move', () => { drawShade(); });
+// ?debug=1: show map errors and tile state on the panel (for headless screenshots).
+const debug = q.has('debug'), errs = [];
+map.on('error', e => { errs.push(String(e.error?.message || e.error || e).slice(0, 80)); showDebug(); });
+map.on('idle', showDebug);
+function showDebug() {
+  if (!debug) return;
+  const st = ['openmaptiles', 'vexcel'].map(id => `${id}:${map.getSource(id) ? (map.isSourceLoaded(id) ? 'ok' : 'loading') : 'none'}`);
+  document.getElementById('info').textContent = `z${map.getZoom().toFixed(1)} ${st.join(' ')} gl:${!!map.painter} errs:${errs.length} ${errs.slice(0, 2).join(' | ')}`;
+}
+map.on('moveend', update);
+slider.addEventListener('input', update);
+addEventListener('resize', drawShade);
+
+// Point `dist` metres from (lat, lon) along azimuth `az` (great circle).
+function dest(lat, lon, az, dist) {
+  const d = dist / 6371000, b = az * RAD, p1 = lat * RAD, l1 = lon * RAD;
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return [l2 / RAD, p2 / RAD];
+}
+
+// Darkness over the whole view: sample the sun's elevation on a coarse grid of screen points,
+// draw it into a tiny canvas, and let the browser stretch it smoothly over the map.
+const canvas = document.getElementById('shade');
+function drawShade() {
+  const cols = 24, rows = Math.max(12, Math.round(24 * innerHeight / innerWidth));
+  canvas.width = cols; canvas.height = rows;
+  const ctx = canvas.getContext('2d'), img = ctx.createImageData(cols, rows);
+  const s = sunState(timeMs()), w = map.getContainer().clientWidth, h = map.getContainer().clientHeight;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const ll = map.unproject([(c + 0.5) * w / cols, (r + 0.5) * h / rows]);
+    const col = shade(sunAt(s, ll.lat, ll.lng).el), k = (r * cols + c) * 4;
+    img.data[k] = col[0]; img.data[k + 1] = col[1]; img.data[k + 2] = col[2]; img.data[k + 3] = col[3] * 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+const dayOf = ms => new Date(ms).toLocaleDateString('en-CA', { timeZone: tz });
+const fmt = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz });
+function update() {
+  drawShade();
+  const c = map.getCenter(), ms = timeMs(), sun = sunAt(sunState(ms), c.lat, c.lng), ss = nextSunset(ms, c.lat, c.lng);
+  const b = map.getBounds(), reach = 0.45 * (b.getNorth() - b.getSouth()) * 111320; // ~half the screen height, metres
+  const feats = [];
+  if (ss) feats.push({ type: 'Feature', properties: { kind: 'sunset' },
+    geometry: { type: 'LineString', coordinates: [[c.lng, c.lat], dest(c.lat, c.lng, ss.az, reach)] } });
+  if (sun.el > -0.833) feats.push({ type: 'Feature', properties: { kind: 'sun' },
+    geometry: { type: 'LineString', coordinates: [[c.lng, c.lat], dest(c.lat, c.lng, sun.az, reach * 0.8)] } });
+  map.getSource('sunlines')?.setData({ type: 'FeatureCollection', features: feats });
+  const [name, colour] = phaseOf(sun.el);
+  const ph = document.getElementById('phase'); ph.textContent = name; ph.style.background = colour;
+  const day = new Date(ms).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
+  document.getElementById('time').textContent = `${day} ${fmt(ms)}`;
+  document.getElementById('info').textContent =
+    `Sun ${sun.el.toFixed(1)}° up, az ${sun.az.toFixed(0)}° · ` + (ss ? `${dayOf(ss.ms) === dayOf(ms) ? 'sunset' : 'tomorrow’s sunset'} ${fmt(ss.ms)} at ${ss.az.toFixed(0)}°` : 'no sunset in 24 h');
+}
+</script>
+</body>
+</html>

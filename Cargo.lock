@@ -902,6 +902,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+ "vexcel",
 ]
 
 [[package]]
