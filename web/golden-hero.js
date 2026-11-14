@@ -6,7 +6,7 @@
   const DEG = Math.PI / 180;
   const state = { lat: 40.758, lon: -73.9855, name: 'New York · approximate', tz: 'America/New_York', temp: null, cloud: 25, wind: 5, code: 0, sunrise: '', sunset: '', source: 'fallback', buildings: false };
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#263651');
+  scene.background = new THREE.Color('#1b4572');
   scene.fog = new THREE.FogExp2('#75859c', .0016);
   const camera = new THREE.PerspectiveCamera(59, 1, 1, 6500);
   camera.position.set(180, 240, 510);
@@ -17,7 +17,7 @@
   renderer.outputEncoding = THREE.sRGBEncoding;
   host.appendChild(renderer.domElement);
   const world = new THREE.Group(); scene.add(world);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000,5000), new THREE.MeshStandardMaterial({color:'#303947',roughness:1}));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000,5000), new THREE.MeshStandardMaterial({color:'#2c4560',roughness:1}));
   ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
   const ambient = new THREE.HemisphereLight(0xb5cfff,0x222536,1); scene.add(ambient);
   const sunlight = new THREE.DirectionalLight(0xffd0a0,2.1);
@@ -119,8 +119,9 @@
     sunDisc.visible=p.el>-4;
     const daylight=Math.max(0,Math.min(1,(p.el+6)/20));
     sunlight.intensity=.04+daylight*2.6*(1-state.cloud/170);
-    ambient.intensity=.22+daylight*.9;
-    const night=new THREE.Color('#0a1020'),dusk=new THREE.Color('#b16b68'),day=new THREE.Color('#78a9d1');
+    ambient.intensity=.55+daylight*.6;
+    // sky-blue theme (task 032): twilight blue at night, sunset orange at dusk, sky blue by day
+    const night=new THREE.Color('#1b4572'),dusk=new THREE.Color('#e8875a'),day=new THREE.Color('#7cc2f0');
     const sky=p.el<0?night.clone().lerp(dusk,Math.max(0,(p.el+12)/12)):dusk.clone().lerp(day,Math.min(1,p.el/24));
     scene.background.copy(sky);scene.fog.color.copy(sky);
     cloudMat.opacity=Math.min(.85,.12+state.cloud/120);
