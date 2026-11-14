@@ -58,3 +58,11 @@ links a roof to a building only within 40 m of CoStar's point, which is the stre
 the roof on a big block. `Spot.building_id` stays strict; for the call sheet the agent now asks the nearest CoStar
 building within 100 m and adds a caveat with the distance ("check it's the right building"). One request per
 building. Tested live: 2 of 3 roofs got contacts (47 m, 69 m).
+
+**Coverage update (same branch).** Vexcel now serves Princeton (`n40w74-us-nj-trenton-2026`, flown June 2026),
+but the CoStar kit is still LA (~1,580 buildings) and Houston (~1,760) only: 0 in New Jersey. The agent now tells
+the two cases apart: if CoStar has no building within 3 km of the area, the sheet gets one caveat ("CoStar covers
+LA and Houston, not this area") and the buildings step says so, instead of "roof #n isn't matched" per spot.
+Coverage wording updated in README (Limits), DESIGN (Where), and the vexcel/server comments.
+Live: Princeton default brief, 15 s, Vexcel heights + obliques, 3 roof spots, no contacts (as expected);
+downtown LA still gets its contacts.

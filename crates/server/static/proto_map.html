@@ -113,7 +113,7 @@ slider.value = Math.round(+(q.get('h') ?? 0) * 6);
 const timeMs = () => t0 + slider.value * 600000;
 
 // Basemaps: Esri (commercial data: HERE, Garmin, USGS...), not OpenStreetMap, which was too patchy for us.
-// Raster tiles, no key. Map mode: Esri World Street Map. Photo mode: Vexcel where it covers (LA/Houston),
+// Raster tiles, no key. Map mode: Esri World Street Map. Photo mode: Vexcel where it covers (LA/Houston/Princeton),
 // Esri World Imagery elsewhere, with Esri's road and place labels on top.
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
 const esri = (path, maxzoom, attribution) => ({
