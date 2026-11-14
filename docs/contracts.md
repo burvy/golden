@@ -38,7 +38,7 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `PhotoMeta` | defined | server | `photo::PhotoMeta` | `photo_meta.json` |
 | `Building` | defined | costar | `building::{Building, BuildingList}` | `buildings.json` |
 | `ApiError` | defined | server | `error::ApiError` | `error.json` |
-| `CallSheet` | TODO (agent) | server | | |
+| `AgentRequest`, `CallSheet` | defined | server | `agent::{AgentRequest, CallSheet}` | `agent_request.json`, `call_sheet.json` |
 
 All fixtures are in `fixtures/`. `cargo test -p contracts` checks every fixture parses into its struct.
 Fixture numbers are realistic but made up (except the sun times, which are NOAA's for downtown LA).
@@ -57,6 +57,7 @@ Server: `http://localhost:8787` (`crates/server`). All `GET` parameters are quer
 | `GET /api/photo` | `PhotoMeta` (+ JPEG) | Vexcel aerial photo of the view |
 | `GET /api/buildings` | `BuildingList` | CoStar buildings near a point (who to ask for access) |
 | `GET /api/buildings/{id}` | `Building` | One building |
+| `POST /api/agent` | `CallSheet` | Free-text brief in, call sheet out (the agent) |
 
 **Errors** (every endpoint): JSON `ApiError` `{"error": "human-readable message"}` with status:
 
@@ -386,5 +387,56 @@ Heights for the 3D view, in rings of decreasing detail, so the phone draws ~200k
 ### ApiError
 `{"error": "lat must be in [-90, 90] and lon in [-180, 180]"}`, with a status code from the table under Endpoints.
 
-### CallSheet
-TODO (agent): spots, times, backups, reasons, who to call.
+### AgentRequest and CallSheet
+`POST /api/agent` turns a typed brief into a call sheet. The agent (Claude, or an offline mock without a key)
+reads the text, builds a `Brief`, calls `search`, `horizon`, `buildings` and `photo` as tools, and writes the sheet.
+It can take 10–30 s; show progress in the web app.
+
+Request (`AgentRequest`):
+```json
+{
+  "text": "sun setting between two towers, from a rooftop, late June",
+  "area": { "lat": 34.0490, "lon": -118.2510, "radius_m": 400 },
+  "date": null,
+  "tz": "America/Los_Angeles"
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `text` | required | The brief as typed. |
+| `area` | `null` | Where to look. `null`: the agent picks from the text, else downtown LA. |
+| `date` | `null` | Local day. `null`: the agent picks from the text ("late June" → a date), else the next day. |
+| `tz` | `America/Los_Angeles` | |
+
+Response (`CallSheet`):
+```json
+{
+  "title": "Sun between two towers, DTLA rooftop",
+  "brief": { "...": "the Brief the agent searched with" },
+  "summary": "Shoot from the roof of Example Tower on Wed 24 June. The sun drops into a 9 m gap between two towers at 19:58.",
+  "timeline": [
+    { "t": "2026-06-24T19:00:00-07:00", "what": "Arrive and set up on the roof" },
+    { "t": "2026-06-24T19:19:40-07:00", "what": "Golden hour starts" },
+    { "t": "2026-06-24T19:58:40-07:00", "what": "Sun enters the gap: the shot" }
+  ],
+  "spots": [
+    { "role": "primary", "spot": { "...": "Spot" }, "arrive_by": "2026-06-24T19:00:00-07:00", "notes": ["Facing 297°, west-north-west"], "photo_url": "/api/photo/b81e44d0.jpg" }
+  ],
+  "access": [
+    { "building_id": "costar:1234567", "building_name": "Example Tower", "contact": { "role": "leasing", "name": "Jane Doe", "company": "Example Realty", "phone": "+1 213 555 0100", "email": "jane@example.com" }, "ask": "Roof access 19:00–20:30 on 24 June for a 3-person crew, no lights" }
+  ],
+  "caveats": ["Height map is from April 2026; newer buildings may be missing"],
+  "model": "mock"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `title`, `summary` | Short headline and 1–3 plain sentences for the top of the sheet. |
+| `brief` | The `Brief` the agent actually searched with, so the user can see how it read the text. |
+| `timeline` | `{t, what}` in time order: arrival, golden hour, the moment of the shot, sunset. |
+| `spots` | `role` is `"primary"` (exactly one, first) or `"backup"`. `spot` is a full `Spot`. `arrive_by` is a time. `photo_url` (or `null`) is an image from `/api/photo`. |
+| `access` | Who to ask for each roof spot. `contact` is a CoStar `Contact` (or `null` if CoStar has none). `ask` is a ready-to-send one-line request. |
+| `caveats` | Honest limits that apply to this sheet. |
+| `model` | Which model wrote it (e.g. a Claude model id), or `"mock"`. |

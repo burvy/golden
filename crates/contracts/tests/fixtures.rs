@@ -103,3 +103,21 @@ fn error() {
     let e: ApiError = load("error.json");
     assert!(!e.error.is_empty());
 }
+
+#[test]
+fn agent_request() {
+    let r: AgentRequest = load("agent_request.json");
+    assert!(r.date.is_none() && r.area.is_some());
+    let minimal: AgentRequest = serde_json::from_str(r#"{"text":"sunset from a roof"}"#).unwrap();
+    assert_eq!((minimal.area, minimal.date, minimal.tz.as_str()), (None, None, "America/Los_Angeles"));
+}
+
+#[test]
+fn call_sheet() {
+    let c: CallSheet = load("call_sheet.json");
+    assert_eq!(c.spots[0].role, SpotRole::Primary, "primary comes first");
+    assert_eq!(c.spots.iter().filter(|s| s.role == SpotRole::Primary).count(), 1, "exactly one primary");
+    assert!(c.timeline.windows(2).all(|w| w[0].t < w[1].t), "timeline in time order");
+    let roof_ids: Vec<_> = c.spots.iter().filter_map(|s| s.spot.building_id.as_ref()).collect();
+    assert!(c.access.iter().all(|a| roof_ids.contains(&&a.building_id)), "access only for sheet buildings");
+}

@@ -5,6 +5,7 @@
 //! Change a shape only in its own small PR, together with `docs/contracts.md` and its fixture.
 //! Times are ISO 8601 strings with the local offset, so this crate needs no time library.
 
+pub mod agent;
 pub mod building;
 pub mod dsm;
 pub mod error;
@@ -14,6 +15,7 @@ pub mod scene;
 pub mod search;
 pub mod sun;
 
+pub use agent::{Access, AgentRequest, CallSheet, SheetSpot, SpotRole, TimelineItem};
 pub use building::{Building, BuildingList, Contact, ContactRole, Matterport};
 pub use dsm::{DsmFileError, DsmGrid, DsmMeta, DsmSource, EARTH_R, NODATA};
 pub use error::ApiError;

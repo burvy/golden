@@ -1,0 +1,88 @@
+{
+  "title": "Sun between two towers, DTLA rooftop",
+  "brief": {
+    "text": "sun setting between two towers, from a rooftop, late June",
+    "area": { "lat": 34.0490, "lon": -118.2510, "radius_m": 400 },
+    "date": "2026-06-24",
+    "tz": "America/Los_Angeles",
+    "event": "sunset",
+    "standing": "roof",
+    "framing": "between",
+    "max_spots": 10
+  },
+  "summary": "Shoot from the roof of Example Tower on Wed 24 June. The sun drops into a 9 m gap between two towers at 19:58. Backup: a lower roof 200 m south-east, where the sun reaches a wider gap at 19:41.",
+  "timeline": [
+    { "t": "2026-06-24T19:00:00-07:00", "what": "Arrive and set up on the roof" },
+    { "t": "2026-06-24T19:19:40-07:00", "what": "Golden hour starts" },
+    { "t": "2026-06-24T19:58:40-07:00", "what": "Sun enters the gap: the shot" },
+    { "t": "2026-06-24T20:08:16-07:00", "what": "Sunset (flat horizon)" },
+    { "t": "2026-06-24T20:24:50-07:00", "what": "Golden hour ends" }
+  ],
+  "spots": [
+    {
+      "role": "primary",
+      "spot": {
+        "id": "s-34.04912--118.25087-roof",
+        "rank": 1,
+        "score": 0.91,
+        "lat": 34.04912,
+        "lon": -118.25087,
+        "standing": "roof",
+        "ground_m": 131.5,
+        "eye_m": 133.2,
+        "sun": {
+          "date": "2026-06-24",
+          "flat_sunset": "2026-06-24T20:08:16-07:00",
+          "hidden_at": "2026-06-24T19:58:40-07:00",
+          "hidden_az_deg": 296.8,
+          "hidden_elev_deg": 2.1,
+          "golden_min_visible": 39
+        },
+        "why": ["Sun drops into a 9 m gap between two towers at 19:58", "39 min of golden hour in view", "Roof 46 m up"],
+        "building_id": "costar:1234567"
+      },
+      "arrive_by": "2026-06-24T19:00:00-07:00",
+      "notes": ["Face 297° (west-north-west)", "The gap is narrow: the sun is fully inside it for about 2 minutes"],
+      "photo_url": "/api/photo/fixture.jpg"
+    },
+    {
+      "role": "backup",
+      "spot": {
+        "id": "s-34.04788--118.24931-roof",
+        "rank": 2,
+        "score": 0.74,
+        "lat": 34.04788,
+        "lon": -118.24931,
+        "standing": "roof",
+        "ground_m": 118.0,
+        "eye_m": 119.7,
+        "sun": {
+          "date": "2026-06-24",
+          "flat_sunset": "2026-06-24T20:08:16-07:00",
+          "hidden_at": "2026-06-24T19:41:10-07:00",
+          "hidden_az_deg": 294.2,
+          "hidden_elev_deg": 5.0,
+          "golden_min_visible": 22
+        },
+        "why": ["Sun sets into a wide gap between two towers at 19:41", "22 min of golden hour in view"],
+        "building_id": null
+      },
+      "arrive_by": "2026-06-24T18:45:00-07:00",
+      "notes": ["Happens 17 minutes earlier than the primary"],
+      "photo_url": null
+    }
+  ],
+  "access": [
+    {
+      "building_id": "costar:1234567",
+      "building_name": "Example Tower",
+      "contact": { "role": "leasing", "name": "Jane Doe", "company": "Example Realty", "phone": "+1 213 555 0100", "email": "jane@example.com" },
+      "ask": "Roof access 19:00–20:30 on Wed 24 June for a 3-person student film crew, no lights or drones"
+    }
+  ],
+  "caveats": [
+    "Height map is from April 2026; newer buildings may be missing",
+    "The backup roof's building isn't in CoStar, so there's no contact for it"
+  ],
+  "model": "mock"
+}

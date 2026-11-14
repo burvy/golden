@@ -28,7 +28,7 @@ pub struct Brief {
 pub const DEFAULT_TZ: &str = "America/Los_Angeles";
 pub const MAX_BRIEF_RADIUS_M: f64 = 800.0;
 
-fn default_tz() -> String {
+pub(crate) fn default_tz() -> String {
     DEFAULT_TZ.to_string()
 }
 
