@@ -8,7 +8,7 @@
 //!   GET  /api/scene (+ .bin)     SceneMeta: heights in rings for the 3D view
 //!   GET  /api/photo (+ .jpg)     PhotoMeta: Vexcel oblique looking toward the sun
 //!   GET  /api/buildings[/{id}]   CoStar buildings (empty without the kit)
-//!   POST /api/agent              CallSheet: typed brief in, call sheet out (Gemini, or the offline mock)
+//!   POST /api/agent              CallSheet: typed brief in, call sheet out (Claude, or the offline mock)
 //!   GET  /api/tiles/vexcel/...   Vexcel map tiles (proxy + cache), 204 where none
 //!   GET  /proto/map              map prototype
 //!
@@ -40,7 +40,7 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("could not bind {addr} (already running?): {e}"));
     let state = Arc::new(state::AppState::from_env());
-    println!("Gemini: {}", if secrets::get("GEMINI_API_KEY").is_some() { "key found" } else { "no key: the agent runs as the offline mock" });
+    println!("Claude: {}", if secrets::get("ANTHROPIC_API_KEY").is_some() { "key found" } else { "no key: the agent runs as the offline mock" });
     println!("golden on http://{addr}  (web app at /, API under /api)");
     axum::serve(listener, app(state)).await.expect("server crashed");
 }

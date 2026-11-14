@@ -1,18 +1,19 @@
 //! `POST /api/agent`: typed brief in, `CallSheet` out (docs/contracts.md#agentrequest-and-callsheet).
 //!
 //! The loop, each step logged into `CallSheet.steps` so the app shows the agent's work:
-//! 1. **read**: text -> `Brief` (place, date, sunrise/sunset, roof/ground, framing). Gemini if
-//!    `GEMINI_API_KEY` is set, else the offline reader (`read.rs`). Places resolve to coordinates through
+//! 1. **read**: text -> `Brief` (place, date, sunrise/sunset, roof/ground, framing). Claude if
+//!    `ANTHROPIC_API_KEY` is set, else the offline reader (`read.rs`). Places resolve to coordinates through
 //!    our presets or Google Places, never from model text.
 //! 2. **search** (`/api/search` logic, core's ranking over the height map). If nothing fits, **plan**:
 //!    relax the framing/standing, then widen the area, and search again.
 //! 3. **sun** (sun path at the primary spot), **photo** (Vexcel oblique toward the sun),
 //!    **buildings** (CoStar contact for roof spots).
-//! 4. **write**: title, summary, notes, access requests. Gemini's words are only accepted if every clock
-//!    time in them came from the tools (`gemini::times_ok`); otherwise the templated text is used.
+//! 4. **write**: title, summary, notes, access requests. Claude's words are only accepted if every clock
+//!    time in them came from the tools (`times::times_ok`); otherwise the templated text is used.
 
-pub mod gemini;
+pub mod claude;
 pub mod read;
+pub mod times;
 
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ use serde_json::json;
 use crate::api::{self, PhotoReq};
 use crate::state::{ApiErr, AppState};
 use crate::{secrets, sunpath, tz};
-use gemini::Gemini;
+use claude::Claude;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new().route("/api/agent", post(post_agent)).with_state(state)
@@ -64,11 +65,11 @@ struct Place {
 }
 
 pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result<CallSheet, ApiErr> {
-    let gem = Gemini::from_env(&st.http);
+    let llm = Claude::from_env(&st.http);
     let mut log = Log::default();
 
     // 1. read
-    let (brief, place) = read_brief(st, &req, now, gem.as_ref(), &mut log).await?;
+    let (brief, place) = read_brief(st, &req, now, llm.as_ref(), &mut log).await?;
 
     // 2. search, re-planning if nothing fits
     let (result, notes) = search_with_replan(st, brief, &place.name, &mut log).await?;
@@ -150,8 +151,8 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
     // 4. assemble, then write the words
     let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, costar, notes);
     let mut model = "mock".to_string();
-    if let Some(g) = &gem {
-        match write_with_gemini(g, &place, &sheet).await {
+    if let Some(g) = &llm {
+        match write_with_claude(g, &place, &sheet).await {
             Ok(words) => {
                 apply(&mut sheet, words);
                 model = g.model.clone();
@@ -160,8 +161,8 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
             Err(why) => log.add("write", format!("Kept the templated wording: {why}")),
         }
     } else {
-        log.add("write", "Wrote the sheet from templates (no GEMINI_API_KEY: offline mock)");
-        sheet.caveats.push("Written by the offline mock (no Gemini key yet): the wording is templated; all numbers come from the tools.".into());
+        log.add("write", "Wrote the sheet from templates (no ANTHROPIC_API_KEY: offline mock)");
+        sheet.caveats.push("Written by the offline mock (no Claude key yet): the wording is templated; all numbers come from the tools.".into());
     }
     sheet.model = model;
     sheet.steps = log.0;
@@ -170,7 +171,7 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
 
 // ---- 1. read ---------------------------------------------------------------------------------
 
-async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, gem: Option<&Gemini>, log: &mut Log) -> Result<(Brief, Place), ApiErr> {
+async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: Option<&Claude>, log: &mut Log) -> Result<(Brief, Place), ApiErr> {
     let text = req.text.trim();
     // what the model (or the reader) thinks the place is called
     let mut place_word = read::preset_in(text).map(|p| p.name.to_string());
@@ -180,10 +181,10 @@ async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, gem: 
     let mut model_date: Option<String> = None;
     let mut by = "the offline reader";
 
-    if let Some(g) = gem {
-        match gemini_read(g, text, now, req).await {
+    if let Some(g) = llm {
+        match claude_read(g, text, now, req).await {
             Ok(v) => {
-                by = "Gemini";
+                by = "Claude";
                 if let Some(p) = v["place"].as_str().filter(|p| !p.trim().is_empty()) {
                     place_word = Some(p.trim().to_string());
                 }
@@ -192,7 +193,7 @@ async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, gem: 
                 framing = parse_enum(&v["framing"]).unwrap_or(framing);
                 model_date = v["date"].as_str().map(str::to_string);
             }
-            Err(e) => log.add("read", format!("Gemini couldn't read the brief ({e}); using the offline reader")),
+            Err(e) => log.add("read", format!("Claude couldn't read the brief ({e}); using the offline reader")),
         }
     }
 
@@ -256,7 +257,7 @@ fn parse_enum<T: serde::de::DeserializeOwned>(v: &serde_json::Value) -> Option<T
     serde_json::from_value(v.clone()).ok()
 }
 
-async fn gemini_read(g: &Gemini, text: &str, now: DateTime<Utc>, req: &AgentRequest) -> Result<serde_json::Value, String> {
+async fn claude_read(g: &Claude, text: &str, now: DateTime<Utc>, req: &AgentRequest) -> Result<serde_json::Value, String> {
     let zone = tz::parse(&req.tz).unwrap_or(chrono_tz::America::Los_Angeles);
     let today = now.with_timezone(&zone).date_naive();
     let places: Vec<&str> = read::PRESETS.iter().map(|p| p.name).collect();
@@ -273,15 +274,16 @@ async fn gemini_read(g: &Gemini, text: &str, now: DateTime<Utc>, req: &AgentRequ
         places
     );
     let schema = json!({
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-            "place": { "type": "STRING" },
-            "date": { "type": "STRING" },
-            "event": { "type": "STRING", "enum": ["sunset", "sunrise"] },
-            "standing": { "type": "STRING", "enum": ["roof", "ground", "any"] },
-            "framing": { "type": "STRING", "enum": ["clear", "between", "behind"] }
+            "place": { "type": "string" },
+            "date": { "type": "string" },
+            "event": { "type": "string", "enum": ["sunset", "sunrise"] },
+            "standing": { "type": "string", "enum": ["roof", "ground", "any"] },
+            "framing": { "type": "string", "enum": ["clear", "between", "behind"] }
         },
-        "required": ["place", "date", "event", "standing", "framing"]
+        "required": ["place", "date", "event", "standing", "framing"],
+        "additionalProperties": false
     });
     g.json(&prompt, schema).await
 }
@@ -608,8 +610,9 @@ fn capture_day(s: &str) -> String {
     }
 }
 
-// ---- Gemini writing ----------------------------------------------------------------------------
+// ---- Claude writing ----------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct Words {
     title: String,
     summary: String,
@@ -617,14 +620,14 @@ struct Words {
     asks: Vec<String>,
 }
 
-async fn write_with_gemini(g: &Gemini, place: &Place, sheet: &CallSheet) -> Result<Words, String> {
+async fn write_with_claude(g: &Claude, place: &Place, sheet: &CallSheet) -> Result<Words, String> {
     let allowed: Vec<String> = sheet
         .timeline
         .iter()
         .map(|t| hhmm(&t.t))
-        .chain(sheet.spots.iter().flat_map(|s| s.notes.iter().flat_map(|n| gemini::clock_times(n))))
+        .chain(sheet.spots.iter().flat_map(|s| s.notes.iter().flat_map(|n| times::clock_times(n))))
         .chain(sheet.spots.iter().map(|s| hhmm(&s.arrive_by)))
-        .chain(sheet.access.iter().flat_map(|a| gemini::clock_times(&a.ask)))
+        .chain(sheet.access.iter().flat_map(|a| times::clock_times(&a.ask)))
         .collect();
     let facts = json!({
         "place": place.name,
@@ -645,14 +648,15 @@ async fn write_with_gemini(g: &Gemini, place: &Place, sheet: &CallSheet) -> Resu
          asks: one polite one-line roof-access request per access item, same order (keep its times)."
     );
     let schema = json!({
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-            "title": { "type": "STRING" },
-            "summary": { "type": "STRING" },
-            "notes": { "type": "ARRAY", "items": { "type": "ARRAY", "items": { "type": "STRING" } } },
-            "asks": { "type": "ARRAY", "items": { "type": "STRING" } }
+            "title": { "type": "string" },
+            "summary": { "type": "string" },
+            "notes": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+            "asks": { "type": "array", "items": { "type": "string" } }
         },
-        "required": ["title", "summary", "notes", "asks"]
+        "required": ["title", "summary", "notes", "asks"],
+        "additionalProperties": false
     });
     let v = g.json(&prompt, schema).await?;
     let strs = |v: &serde_json::Value| -> Vec<String> { v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default() };
@@ -663,15 +667,15 @@ async fn write_with_gemini(g: &Gemini, place: &Place, sheet: &CallSheet) -> Resu
         asks: strs(&v["asks"]),
     };
     if w.title.is_empty() || w.summary.is_empty() {
-        return Err("Gemini left the title or summary empty".into());
+        return Err("Claude left the title or summary empty".into());
     }
     let all: Vec<&str> = [w.title.as_str(), w.summary.as_str()]
         .into_iter()
         .chain(w.notes.iter().flatten().map(String::as_str))
         .chain(w.asks.iter().map(String::as_str))
         .collect();
-    if let Some(bad) = all.iter().find(|t| !gemini::times_ok(t, &allowed)) {
-        return Err(format!("Gemini's text had a time the tools didn't compute: \"{}\"", bad.chars().take(80).collect::<String>()));
+    if let Some(bad) = all.iter().find(|t| !times::times_ok(t, &allowed)) {
+        return Err(format!("Claude's text had a time the tools didn't compute: \"{}\"", bad.chars().take(80).collect::<String>()));
     }
     Ok(w)
 }
@@ -709,6 +713,126 @@ mod tests {
         assert_eq!(capture_day("Wed Jun 03 18:10:27 UTC 2026"), "3 Jun 2026");
         assert_eq!(capture_day("2026-04-19"), "19 Apr 2026");
         assert_eq!(capture_day("2015"), "2015");
+    }
+
+    // ---- fake Claude: a local server that answers /v1/messages with a canned reply ----
+
+    /// Serves `reply` as the Messages API answer and records the request headers and body it got.
+    async fn fake_claude(reply: serde_json::Value) -> (Claude, Arc<std::sync::Mutex<Vec<(axum::http::HeaderMap, serde_json::Value)>>>) {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let app = Router::new().route(
+            "/v1/messages",
+            post(move |headers: axum::http::HeaderMap, Json(body): Json<serde_json::Value>| {
+                let reply = reply.clone();
+                let log = log.clone();
+                async move {
+                    log.lock().unwrap().push((headers, body));
+                    Json(reply)
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (Claude::new("test-key".into(), claude::DEFAULT_MODEL.into(), url, &reqwest::Client::new()), seen)
+    }
+
+    /// A Messages API answer whose text block is `text` (after an empty thinking block, as real answers have).
+    fn answer(text: &str) -> serde_json::Value {
+        json!({"type": "message", "role": "assistant", "stop_reason": "end_turn",
+               "content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": text}]})
+    }
+
+    fn test_state() -> AppState {
+        AppState {
+            grids: Default::default(),
+            scenes: Default::default(),
+            kit: None,
+            http: reqwest::Client::new(),
+            cache_root: std::env::temp_dir(),
+        }
+    }
+
+    fn fixture_sheet() -> CallSheet {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/call_sheet.json")).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    fn la_place() -> Place {
+        Place { name: "Downtown LA".into(), area: Area { lat: 34.049, lon: -118.251, radius_m: 400.0 }, tz: "America/Los_Angeles".into() }
+    }
+
+    /// A brief whose words point one way; the fake model answers the other way, so we can tell who read it.
+    fn brief_req() -> AgentRequest {
+        AgentRequest {
+            text: "sunset from the street, sun between two buildings".into(),
+            area: Some(Area { lat: 34.049, lon: -118.251, radius_m: 300.0 }),
+            date: None,
+            tz: "America/Los_Angeles".into(),
+        }
+    }
+
+    fn now() -> DateTime<Utc> {
+        "2026-06-20T18:00:00Z".parse().unwrap()
+    }
+
+    #[tokio::test]
+    async fn read_uses_claudes_json() {
+        let (g, seen) = fake_claude(answer(r#"{"place":"","date":"2026-06-24","event":"sunrise","standing":"roof","framing":"behind"}"#)).await;
+        let mut log = Log::default();
+        let (brief, _) = read_brief(&test_state(), &brief_req(), now(), Some(&g), &mut log).await.unwrap();
+        assert_eq!((brief.event, brief.standing, brief.framing), (Event::Sunrise, Standing::Roof, Framing::Behind));
+        assert_eq!(brief.date, "2026-06-24");
+        assert!(log.0.last().unwrap().summary.ends_with("(by Claude)"));
+
+        let seen = seen.lock().unwrap();
+        let (headers, body) = &seen[0];
+        assert_eq!(headers["x-api-key"], "test-key");
+        assert_eq!(headers["anthropic-version"], "2023-06-01");
+        assert_eq!(body["model"], claude::DEFAULT_MODEL);
+        assert_eq!(body["output_config"]["format"]["schema"]["additionalProperties"], false);
+    }
+
+    #[tokio::test]
+    async fn read_falls_back_to_the_offline_reader_on_bad_json() {
+        let (g, _) = fake_claude(answer("Sure! It's a sunrise on a roof.")).await;
+        let mut log = Log::default();
+        let (brief, _) = read_brief(&test_state(), &brief_req(), now(), Some(&g), &mut log).await.unwrap();
+        // the offline reader's reading of the words: sunset, street, between
+        assert_eq!((brief.event, brief.standing, brief.framing), (Event::Sunset, Standing::Ground, Framing::Between));
+        assert!(log.0.iter().any(|s| s.summary.starts_with("Claude couldn't read the brief")));
+        assert!(log.0.last().unwrap().summary.ends_with("(by the offline reader)"));
+    }
+
+    #[tokio::test]
+    async fn write_accepts_words_with_tool_times() {
+        let words = json!({"title": "Two towers at sunset", "summary": "The sun drops into the gap at 19:58. Arrive by 19:00.",
+                           "notes": [["Face west-north-west"], []], "asks": ["May we use the roof 19:00–20:30 on 24 June?"]});
+        let (g, _) = fake_claude(answer(&words.to_string())).await;
+        let mut sheet = fixture_sheet();
+        let w = write_with_claude(&g, &la_place(), &sheet).await.unwrap();
+        apply(&mut sheet, w);
+        assert_eq!(sheet.title, "Two towers at sunset");
+        assert_eq!(sheet.spots[0].notes, vec!["Face west-north-west"]);
+        assert_eq!(sheet.spots[1].notes, vec!["Happens 17 minutes earlier than the primary"]); // empty list keeps the template
+        assert_eq!(sheet.access[0].ask, "May we use the roof 19:00–20:30 on 24 June?");
+    }
+
+    #[tokio::test]
+    async fn write_rejects_a_made_up_time() {
+        let words = json!({"title": "Two towers", "summary": "The sun sets at 20:15.", "notes": [], "asks": []});
+        let (g, _) = fake_claude(answer(&words.to_string())).await;
+        let err = write_with_claude(&g, &la_place(), &fixture_sheet()).await.unwrap_err();
+        assert!(err.contains("20:15"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn write_rejects_bad_json_and_errors() {
+        let (g, _) = fake_claude(answer("{\"title\": ")).await;
+        assert!(write_with_claude(&g, &la_place(), &fixture_sheet()).await.unwrap_err().contains("JSON"));
+        let (g, _) = fake_claude(json!({"type": "message", "stop_reason": "refusal", "content": []})).await;
+        assert!(write_with_claude(&g, &la_place(), &fixture_sheet()).await.unwrap_err().contains("declined"));
     }
 
     #[test]
