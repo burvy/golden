@@ -11,3 +11,9 @@ name = "golden_core"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 contracts = { path = "../contracts" }
+
+[dev-dependencies]
+# Only for examples/search_la.rs (real LA heights). Core itself stays IO-free.
+vexcel = { path = "../vexcel" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = "1"
