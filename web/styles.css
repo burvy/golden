@@ -37,6 +37,7 @@ a { color: var(--sun2); }
   transition: opacity 1s ease;
 }
 #hero.out { opacity: 0; pointer-events: none; }
+#hero.flat { background: radial-gradient(120% 90% at 70% 72%, #e8893a 0%, #7a3b36 38%, #1a1020 78%); }
 #golden-3d, #golden-3d canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #hero .grain {
   position: absolute; inset: 0; pointer-events: none; opacity: 0.14; mix-blend-mode: overlay;
@@ -157,6 +158,7 @@ textarea { min-height: 88px; resize: vertical; }
 .view svg, .view canvas { width: 100%; height: auto; display: block; }
 .v3 { height: 340px; cursor: grab; touch-action: none; }
 .v3 canvas { height: 100% !important; }
+.tabs button, #copy, #save { background: var(--glass); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; color: var(--ink); }
 .tabs button[aria-selected="true"] { border-color: var(--sun); color: var(--sun2); }
 input[type="range"] { width: 100%; accent-color: var(--sun); }
 .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

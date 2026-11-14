@@ -49,8 +49,10 @@ function setApiLabel() {
   const keys = ['/api/search', '/api/sun', '/api/horizon', '/api/agent', '/api/scene', '/api/photo', '/api/buildings'];
   const down = keys.filter((k) => live[k] === false);
   const up = keys.filter((k) => live[k] === true);
+  const rejected = Object.entries(api.errors()).filter(([, m]) => /^HTTP 4/.test(m)).map(([k, m]) => `${k} (${m})`);
   const el = $('#apiStatus');
-  if (!up.length && !down.length) el.textContent = 'Waiting for the first request';
+  if (rejected.length) el.textContent = `Server rejected ${rejected.join(', ')}. Possible contract mismatch; showing DEMO data`;
+  else if (!up.length && !down.length) el.textContent = 'Waiting for the first request';
   else if (down.length && !up.length) el.textContent = 'Server unreachable — showing labeled DEMO data';
   else if (down.length) el.textContent = `Live API · DEMO fallback for ${down.join(', ')}`;
   else el.textContent = 'Connected to ' + CFG.base;
@@ -334,7 +336,7 @@ function renderCard() {
     if (state.tab === 'h' && ready && c) document.querySelector('.view').innerHTML = pano(c);
     else renderAt(state.t);
   };
-  if (d.photo) { const im = $('#photo'); if (im) im.src = d.photo.url; $('#pnote').textContent = d.photo.note; }
+  if (d.photo) { const im = $('#photo'); if (im && d.photo.url) im.src = d.photo.url; $('#pnote').textContent = d.photo.note; }
   else if (c && !d.photoLoading) { d.photoLoading = true; loadPhoto(c.az); }
   if (state.tab === '3' && ready && d.scene && d.scene !== false) {
     buildScene({ host: $('#v3'), sceneGrid: d.scene, sunPath: d.sun, horizon: d.hz, spot: sp, timeMs: state.t, yaw: c.az });
@@ -356,19 +358,21 @@ function renderBuildings(bld) {
 }
 
 async function loadPhoto(az) {
-  const im = $('#photo');
-  const note = $('#pnote');
-  if (!im || !state.sel) return;
+  if (!state.sel) return;
   const selectedId = state.sel.id;
+  const d = state.d;
   try {
     const p = await api.photo({ lat: state.sel.lat, lon: state.sel.lon, az_deg: az, tz: state.tz, date: $('#date').value });
     if (state.sel?.id !== selectedId) return;
-    state.d.photo = { url: p.url, note: (p.demo ? 'DEMO illustration. ' : '') + (p.attribution || '') + (p.captured ? ` · captured ${p.captured}` : '') };
-    im.src = p.url;
-    note.textContent = state.d.photo.note;
+    d.photo = { url: p.url, note: (p.demo ? 'DEMO illustration. ' : '') + (p.attribution || '') + (p.captured ? ` · captured ${p.captured}` : '') };
   } catch {
-    if (state.sel?.id === selectedId) note.textContent = 'Aerial photo unavailable.';
+    if (state.sel?.id !== selectedId) return;
+    d.photo = { url: '', note: 'Aerial photo unavailable.' };
   }
+  // The card re-renders while the photo loads, so look the elements up again.
+  const im = $('#photo'), note = $('#pnote');
+  if (im && d.photo.url) im.src = d.photo.url;
+  if (note) note.textContent = d.photo.note;
   setApiLabel();
 }
 
@@ -380,10 +384,16 @@ function setBanner(text, kind) {
 
 window.addEventListener('golden:enter', (e) => showApp(e.detail));
 $('#hgo')?.addEventListener('click', () => {
-  if ($('#hero') && !$('#hero').classList.contains('out')) {
-    /* hero script owns the cinematic close; still reveal the app if it did not boot */
-    setTimeout(() => { if ($('#app').hidden) showApp(); }, 200);
-  }
+  // golden-hero.js owns the cinematic close. If it never started (script blocked or
+  // failed), close the overlay here so the app is never stuck behind it.
+  setTimeout(() => {
+    const hero = $('#hero');
+    if (!window.goldenHeroReady && hero) {
+      hero.classList.add('out');
+      setTimeout(() => hero.remove(), 1100);
+    }
+    if ($('#app').hidden) showApp();
+  }, 250);
 });
 
 $('#find').onclick = search;

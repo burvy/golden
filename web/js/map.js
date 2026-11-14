@@ -10,32 +10,42 @@ export function createMap({ host, getBase, onSelect, onMove }) {
   let sunAz = null;
   let fallback = null;
 
+  let lastCenter = { lat: 0, lon: 0 };
+
   function init(center) {
     if (map || fallback) return;
-    if (!window.maplibregl) {
-      fallback = canvasFallback(host, { onSelect, onMove });
-      fallback.setView(center.lat, center.lon, 14);
-      ready = true;
+    lastCenter = center;
+    if (!window.maplibregl) { useFallback(); return; }
+    try {
+      map = new maplibregl.Map({
+        container: host,
+        style: OSM_DARK,
+        center: [center.lon, center.lat],
+        zoom: 14.2,
+        pitch: 42,
+        bearing: -18,
+        attributionControl: true,
+        hash: false,
+      });
+    } catch {
+      useFallback(); // no WebGL
       return;
     }
-    map = new maplibregl.Map({
-      container: host,
-      style: OSM_DARK,
-      center: [center.lon, center.lat],
-      zoom: 14.2,
-      pitch: 42,
-      bearing: -18,
-      attributionControl: true,
-      hash: false,
-    });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 100 }), 'bottom-right');
-    map.on('load', () => {
-      addLayers(map, getBase);
-      ready = true;
-      render();
+    // If the basemap style never arrives (offline venue Wi-Fi), draw the schematic
+    // map instead: ranked spots and the heatmap must still be visible.
+    const guard = setTimeout(() => {
+      if (ready || !map) return;
+      if (map.isStyleLoaded()) ensureLayers();
+      else useFallback();
+    }, 10000);
+    map.on('load', () => { clearTimeout(guard); ensureLayers(); });
+    map.on('error', (e) => {
+      if (!ready && map && !map.isStyleLoaded() && !e?.sourceId && !e?.tile) { clearTimeout(guard); useFallback(); }
     });
     map.on('moveend', () => {
+      if (!map) return;
       const c = map.getCenter();
       onMove?.({ lat: c.lat, lon: c.lng, zoom: map.getZoom(), radius_m: radiusFromZoom(map) });
     });
@@ -53,6 +63,23 @@ export function createMap({ host, getBase, onSelect, onMove }) {
     });
     map.on('mouseenter', 'spots-unclustered', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'spots-unclustered', () => { map.getCanvas().style.cursor = ''; });
+  }
+
+  function ensureLayers() {
+    if (!map || ready) return;
+    addLayers(map, getBase);
+    ready = true;
+    render();
+  }
+
+  function useFallback() {
+    if (fallback) return;
+    try { map?.remove(); } catch { /* already gone */ }
+    map = null;
+    fallback = canvasFallback(host, { onSelect, onMove });
+    fallback.setView(lastCenter.lat, lastCenter.lon, 16);
+    ready = true;
+    render();
   }
 
   function setView(lat, lon, zoom = 14.2) {

@@ -1,5 +1,16 @@
 # Web frontend devlog
 
+## 2026-11-14 — offline hero and contract-shaped demo (`web/offline-hero-contracts`)
+
+- Applied the supplied web patch without committing. The supplied ignore patch was redundant: `.DS_Store` is already ignored and none are tracked.
+- Demo responses use contract wrappers and retain one synthetic search area so ranked spots and their detail cards agree. HTTP 4xx search errors are visible in the API status.
+- Added flat hero and schematic map fallbacks, corrected photo updates after card rendering, and improved tab contrast.
+- Cleared request timeout timers even when fetch rejects, preventing failed requests from delaying test process exit.
+- Checked request parameters and Brief enums against `docs/contracts.md`; the handoff's uncertain query parameters, health endpoint and Vexcel tile route are documented there. Shared contracts and backend code were not changed.
+- Validation: `npm run build` passed all 20 tests, including the committed fixture adapter smoke test, with no skips. `cargo test --workspace` passed 104 tests including doctests; 3 live Vexcel tests remain ignored. `git diff --check` passed.
+- Browser scenarios reported in the supplied handoff were not rerun here. Live engine integration remains unverified; fixture smoke tests do not validate every contract field. Existing third-party service and CDN dependencies remain.
+- Suggested human commit: `web: keep offline scouting usable and align demo data with contracts`.
+
 ## 2026-11-14 — cinematic scouting client (`web/map`)
 
 Rebuilt `web/` as a cinematic location-scouting UI without touching Rust or contracts.

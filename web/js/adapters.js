@@ -61,7 +61,7 @@ export function normalizeSpot(s, i = 0) {
 }
 
 export function normalizeSearch(data, { demo = false } = {}) {
-  const spots = (data?.spots || []).map((s, i) => normalizeSpot(s, i)).filter(Boolean);
+  const spots = (data?.spots || []).map((s, i) => normalizeSpot(s, i)).filter((s) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon));
   spots.sort((a, b) => b.score - a.score || a.rank - b.rank);
 
   return {

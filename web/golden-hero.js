@@ -2,7 +2,37 @@
 (() => {
   const $ = (s) => document.querySelector(s);
   const host = $('#golden-3d'), hero = $('#hero');
-  if (!host || !window.THREE) return;
+  /** No WebGL or three.js blocked: keep the intro, drop the 3D, never trap the user behind the overlay. */
+  function flatHero() {
+    if (!hero) return;
+    window.goldenHeroReady = true;
+    hero.classList.add('flat');
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const tick = () => { if ($('#htime')) $('#htime').textContent = new Date().toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }); };
+    $('#hplace').textContent = tz.split('/').pop().replace(/_/g, ' ');
+    $('#hwx').textContent = '';
+    $('#hsun').textContent = '';
+    $('#hnote').textContent = 'The live 3D skyline is not available on this device. Scouting works as normal.';
+    tick();
+    const iv = setInterval(tick, 1000);
+    let gone = false;
+    const go = () => {
+      if (gone) return;
+      gone = true;
+      clearInterval(iv);
+      hero.classList.add('out');
+      window.dispatchEvent(new CustomEvent('golden:enter', { detail: { tz } }));
+      setTimeout(() => hero.remove(), 1100);
+    };
+    $('#hgo').addEventListener('click', go);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') go(); });
+  }
+  if (!host) return;
+  const glOK = (() => {
+    if (!window.THREE) return false;
+    try { const c = document.createElement('canvas'); return !!(c.getContext('webgl') || c.getContext('experimental-webgl')); } catch { return false; }
+  })();
+  if (!glOK) { flatHero(); return; }
   const DEG = Math.PI / 180;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const state = {
@@ -14,7 +44,8 @@
   scene.fog = new THREE.FogExp2('#75859c', 0.0015);
   const camera = new THREE.PerspectiveCamera(59, 1, 1, 6500);
   camera.position.set(180, 240, 510);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); } catch { flatHero(); return; }
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -227,6 +258,7 @@
   }
   $('#hgo').addEventListener('click', close);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !closed) close(); });
+  window.goldenHeroReady = true;
   placeholder(); updateHUD(); animate(); locate();
   setInterval(() => { if (!closed) updateHUD(); }, 1000);
   setInterval(() => { if (!closed) weather(); }, 600000);

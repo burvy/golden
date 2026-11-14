@@ -9,7 +9,8 @@ export function disposeScene() {
 }
 
 export function buildScene({ host, sceneGrid, sunPath, horizon, spot, timeMs, yaw }) {
-  if (!host || !window.THREE) {
+  if (!host) return;
+  if (!window.THREE) {
     host.innerHTML = '<p class="msg">3D preview needs WebGL.</p>';
     return;
   }

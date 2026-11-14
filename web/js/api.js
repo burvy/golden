@@ -12,6 +12,10 @@ import { createMock } from './mock.js';
 
 export function createClient(getBase) {
   const live = {};
+  const errors = {};
+  /** DEMO instance of the latest search area, so per-spot fallbacks match the ranked list. */
+  let demoMock = null;
+  const mockFor = (ctx) => demoMock || createMock(ctx);
 
   function base() {
     return String(getBase() || 'http://localhost:8787').replace(/\/$/, '');
@@ -23,13 +27,17 @@ export function createClient(getBase) {
     const to = setTimeout(() => ctrl.abort(), timeout);
     const headers = {};
     if (body) headers['Content-Type'] = 'application/json';
-    const res = await fetch(base() + path + qs, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    clearTimeout(to);
+    let res;
+    try {
+      res = await fetch(base() + path + qs, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(to);
+    }
     if (!res.ok) {
       let msg = `HTTP ${res.status}`;
       try {
@@ -54,9 +62,12 @@ export function createClient(getBase) {
     try {
       const out = await fn();
       live[key] = true;
+      delete errors[key];
       return out;
     } catch (e) {
       live[key] = false;
+      errors[key] = e.status ? `HTTP ${e.status}: ${e.message}` : 'unreachable';
+      console.warn(`[golden] ${key} -> DEMO fallback (${errors[key]})`);
       throw e;
     }
   }
@@ -64,12 +75,15 @@ export function createClient(getBase) {
   async function search(ctx) {
     const official = briefFromForm(ctx);
     try {
-      return await tryLive('/api/search', async () => normalizeSearch(
+      const out = await tryLive('/api/search', async () => normalizeSearch(
         await raw('/api/search', { method: 'POST', body: official, timeout: 90000, as: 'json' }),
         { demo: false }
       ));
-    } catch (e) {
-      return createMock(ctx).search();
+      demoMock = null;
+      return out;
+    } catch {
+      demoMock = createMock(ctx);
+      return demoMock.search();
     }
   }
 
@@ -79,7 +93,7 @@ export function createClient(getBase) {
     try {
       return await tryLive('/api/agent', () => raw('/api/agent', { method: 'POST', body: request, timeout: 90000, as: 'json' }));
     } catch {
-      return createMock(ctx).agent();
+      return mockFor(ctx).agent();
     }
   }
 
@@ -88,7 +102,7 @@ export function createClient(getBase) {
     try {
       return await tryLive('/api/sun', async () => normalizeSun(await raw('/api/sun', { params, as: 'json' })));
     } catch {
-      return { ...normalizeSun(createMock(ctx).sun(params)), demo: true };
+      return { ...normalizeSun(mockFor(ctx).sun(params)), demo: true };
     }
   }
 
@@ -99,7 +113,7 @@ export function createClient(getBase) {
         timeout: 90000, as: 'json',
       })));
     } catch {
-      return { ...normalizeHorizon(createMock(ctx).hz({ lat: ctx.lat, lon: ctx.lon })), demo: true };
+      return { ...normalizeHorizon(mockFor(ctx).hz({ lat: ctx.lat, lon: ctx.lon, date: ctx.date })), demo: true };
     }
   }
 
@@ -118,7 +132,9 @@ export function createClient(getBase) {
         return { ...decodeSceneRing(bytes, ring, meta), demo: false };
       });
     } catch {
-      return { ...createMock(ctx).scene(params), demo: true };
+      const { meta, bytes } = mockFor(ctx).sceneBin(params);
+      const ring = pickSceneRing(classifyScene(meta), { desktop: ctx.desktop });
+      return { ...decodeSceneRing(bytes, ring, meta), demo: true };
     }
   }
 
@@ -127,7 +143,7 @@ export function createClient(getBase) {
     try {
       return await tryLive('/api/photo', () => loadPhoto(params));
     } catch {
-      return { url: createMock(ctx).photoDataUrl(ctx.az_deg), attribution: 'DEMO illustration — not aerial photography', demo: true };
+      return { url: mockFor(ctx).photoDataUrl(ctx.az_deg), attribution: 'DEMO illustration — not aerial photography', demo: true };
     }
   }
 
@@ -161,8 +177,7 @@ export function createClient(getBase) {
         return normalizeBuildings(data, { demo: false });
       });
     } catch {
-      live['/api/buildings'] = false;
-      return normalizeBuildings(createMock(ctx).buildings(), { demo: true });
+      return normalizeBuildings(mockFor(ctx).buildings(), { demo: true });
     }
   }
 
@@ -181,7 +196,12 @@ export function createClient(getBase) {
     return { ...live };
   }
 
-  return { search, agent, sun, horizon, scene, photo, buildings, health, status, base };
+  /** Last failure per endpoint: 'unreachable' or 'HTTP 4xx: msg' (a 4xx usually means a contract mismatch). */
+  function lastErrors() {
+    return { ...errors };
+  }
+
+  return { search, agent, sun, horizon, scene, photo, buildings, health, status, errors: lastErrors, base };
 }
 
 function cleanParams(obj) {
