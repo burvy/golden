@@ -87,13 +87,19 @@ pub async fn get_dsm_with(lat: f64, lon: f64, radius_m: f64, opts: &DsmOptions) 
     if !(radius_m > 0.0 && radius_m <= MAX_RADIUS_M) {
         return Err(Error::TooLarge(radius_m));
     }
-    let tiles = plan_tiles(lat, lon, radius_m, opts.near_radius_m);
-    ensure_cached(&tiles, opts).await?;
+    let planned = plan_tiles(lat, lon, radius_m, opts.near_radius_m);
+    let tiles = ensure_cached(&planned, opts).await?;
+    let stood_in = tiles != planned;
     let spec = GridSpec::around(lat, lon, radius_m, opts.cell_m);
     let root = opts.cache_root.clone();
-    tokio::task::spawn_blocking(move || build_grid(spec, &tiles, &root))
+    let mut grid = tokio::task::spawn_blocking(move || build_grid(spec, &tiles, &root))
         .await
-        .map_err(|e| Error::BadData(format!("grid build panicked: {e}")))?
+        .map_err(|e| Error::BadData(format!("grid build panicked: {e}")))??;
+    if stood_in {
+        // Some of the near field is ~0.9 m data, so don't claim the 6 cm of whichever fine tiles were cached.
+        grid.meta.source.native_res_m = tiles::scale(tiles::FAR_LEVEL) * lat.to_radians().cos();
+    }
+    Ok(grid)
 }
 
 /// Which tiles to fetch: level 0 near the point, `FAR_LEVEL` for the rest (if any).
@@ -107,18 +113,72 @@ pub fn plan_tiles(lat: f64, lon: f64, radius_m: f64, near_radius_m: f64) -> Vec<
     out
 }
 
-/// Download every tile not already on disk, a few at a time.
-pub async fn ensure_cached(tiles: &[TileId], opts: &DsmOptions) -> Result<(), Error> {
-    let missing: Vec<TileId> =
-        tiles.iter().copied().filter(|t| !cache::tile_path(&opts.cache_root, *t).exists()).collect();
+/// Download every tile not already on disk, a few at a time, and return the tiles to build the grid from.
+///
+/// That's `tiles` itself, unless the fine (level 0) tiles can't be fetched: with no key, or a key Vexcel
+/// refuses (401/403, e.g. once it has expired), each missing fine tile is replaced by the cached `FAR_LEVEL`
+/// tiles under it (see `cached_only`). `NoKey` (or Vexcel's refusal) only if those aren't cached either.
+pub async fn ensure_cached(tiles: &[TileId], opts: &DsmOptions) -> Result<Vec<TileId>, Error> {
+    let on_disk = |t: TileId| cache::tile_path(&opts.cache_root, t).exists();
+    let missing: Vec<TileId> = tiles.iter().copied().filter(|t| !on_disk(*t)).collect();
     if missing.is_empty() {
-        return Ok(());
+        return Ok(tiles.to_vec());
     }
-    let key = ApiKey::from_env()?;
+    let refused = match ApiKey::from_env() {
+        Ok(key) => match download(&missing, key, opts).await {
+            Ok(()) => return Ok(tiles.to_vec()),
+            Err(e @ Error::Api { status: 401 | 403, .. }) => e,
+            Err(e) => return Err(e),
+        },
+        Err(Error::NoKey) => Error::NoKey,
+        Err(e) => return Err(e),
+    };
+    match cached_only(tiles, on_disk) {
+        Some(built) => {
+            let fine = missing.iter().filter(|t| t.level == 0).count();
+            eprintln!(
+                "vexcel: {} ({fine} of {} fine tiles not cached): building from the cached ~0.9 m tiles there",
+                if matches!(refused, Error::NoKey) { "no key" } else { "key refused" },
+                tiles.iter().filter(|t| t.level == 0).count(),
+            );
+            Ok(built)
+        }
+        None => Err(refused),
+    }
+}
+
+/// The tiles to build from using only the cache: every planned tile, except that a missing level 0 tile is
+/// replaced by the `FAR_LEVEL` tiles that cover it (`build_grid` lays fine data over coarse, so the cached
+/// fine tiles still win where they exist). `None` if a needed tile still isn't cached.
+pub fn cached_only(tiles: &[TileId], cached: impl Fn(TileId) -> bool) -> Option<Vec<TileId>> {
+    let mut out: Vec<TileId> = Vec::with_capacity(tiles.len());
+    let mut add = |t: TileId| {
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    };
+    for &t in tiles {
+        if cached(t) {
+            add(t);
+        } else if t.level == 0 {
+            for c in tiles::tiles_covering(tiles::FAR_LEVEL, tiles::tile_bounds(t)) {
+                if !cached(c) {
+                    return None;
+                }
+                add(c);
+            }
+        } else {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+async fn download(missing: &[TileId], key: ApiKey, opts: &DsmOptions) -> Result<(), Error> {
     let http = client::http()?;
     let gate = Arc::new(tokio::sync::Semaphore::new(opts.max_concurrency.max(1)));
     let mut jobs = tokio::task::JoinSet::new();
-    for t in missing {
+    for &t in missing {
         let (http, key, gate) = (http.clone(), key.clone(), gate.clone());
         let path = cache::tile_path(&opts.cache_root, t);
         jobs.spawn(async move {
@@ -216,6 +276,65 @@ mod tests {
         assert_eq!((g.meta.width, g.meta.height), (40, 40));
         assert!(g.data.iter().all(|&v| v == 42.0));
         assert_eq!(g.meta.source.collection.as_deref(), Some("test-coll"));
+    }
+
+    /// A flat synthetic GeoTIFF of `value` filling tile `t`, written where the cache expects it.
+    async fn put_tile(root: &Path, t: TileId, value: f32) {
+        let (w, _, e, n) = tiles::tile_bounds(t);
+        let px = 64u32;
+        let bytes = geotiff::tests::make_tiff(px, px, w, n, (e - w) / f64::from(px), &vec![value; (px * px) as usize]);
+        cache::write(&cache::tile_path(root, t), &bytes).await.unwrap();
+    }
+
+    #[test]
+    fn cached_only_swaps_missing_fine_tiles_for_the_coarse_ones_under_them() {
+        let planned = plan_tiles(34.049, -118.251, 100.0, 150.0);
+        assert!(planned.len() > 1);
+        let kept = planned[0];
+        let coarse = tiles::tiles_covering(tiles::FAR_LEVEL, tiles::ground_box(34.049, -118.251, 101.0));
+        let cached = |t: TileId| t == kept || coarse.contains(&t);
+        let got = cached_only(&planned, cached).expect("coarse covers it");
+        assert!(got.contains(&kept), "a cached fine tile is still used");
+        assert!(got.iter().all(|t| t.level == tiles::FAR_LEVEL || *t == kept));
+        assert!(coarse.iter().all(|c| got.iter().filter(|t| *t == c).count() == 1), "each coarse tile once");
+    }
+
+    #[test]
+    fn cached_only_gives_up_when_coarse_is_missing_too() {
+        let planned = plan_tiles(34.049, -118.251, 100.0, 150.0);
+        let kept = planned[0];
+        assert_eq!(cached_only(&planned, |t| t == kept), None);
+        assert_eq!(cached_only(&planned, |t| t.level == 0), Some(planned.clone()), "all fine cached: unchanged");
+        // a missing far tile has no stand-in
+        let big = plan_tiles(34.049, -118.251, 1000.0, 150.0);
+        assert_eq!(cached_only(&big, |t| t.level == 0), None);
+    }
+
+    #[tokio::test]
+    async fn no_key_builds_from_cached_coarse_tiles() {
+        if ApiKey::from_env().is_ok() {
+            eprintln!("skipped: a Vexcel key is set, so missing tiles would be downloaded");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("vexcel_nokey_test_{}", std::process::id()));
+        let (lat, lon) = (34.049, -118.251);
+        // 40 m cells: the synthetic coarse tiles are 64 px (~31 m pixels), and each pixel lands in one cell only
+        // (real far tiles are ~1 m pixels, so 1 m cells fill).
+        let opts = DsmOptions { cache_root: root.clone(), cell_m: 40.0, ..DsmOptions::default() };
+        let planned = plan_tiles(lat, lon, 100.0, opts.near_radius_m);
+        // No coarse tiles yet: nothing to stand in, so NoKey as before.
+        put_tile(&root, planned[0], 42.0).await;
+        assert!(matches!(get_dsm_with(lat, lon, 100.0, &opts).await, Err(Error::NoKey)));
+        // Coarse coverage cached: the grid builds, fine data where it's cached, coarse everywhere else.
+        for c in tiles::tiles_covering(tiles::FAR_LEVEL, tiles::ground_box(lat, lon, 101.0)) {
+            put_tile(&root, c, 10.0).await;
+        }
+        let g = get_dsm_with(lat, lon, 100.0, &opts).await.unwrap();
+        std::fs::remove_dir_all(&root).ok();
+        assert!(g.data.iter().all(|&v| v == 42.0 || v == 10.0), "no holes");
+        assert!(g.data.iter().any(|&v| v == 42.0) && g.data.iter().any(|&v| v == 10.0));
+        assert_eq!(g.meta.source.provider, "vexcel");
+        assert!(g.meta.source.native_res_m > 0.5, "says coarse, got {}", g.meta.source.native_res_m);
     }
 
     /// Live: hits Vexcel. Run with `cargo test -p vexcel -- --ignored live`.
