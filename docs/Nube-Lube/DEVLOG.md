@@ -130,3 +130,12 @@
 - Measured: 1 km radius = 2000x2000 cells, 23 s cold, ~100 MB cached, 99.9% filled.
 - Docs: DESIGN (why LiDAR not OSM, numbers, limits), contracts (`provider: "usgs-3dep"`), README (crate, LIDAR_CACHE_DIR).
 - Next per plan: the agent (brief -> tools -> CallSheet, offline mock), then /api/photo and /api/scene.
+
+11/14/26, night - OpenStreetMap out (too low quality): Esri basemap, Google place search
+- Map prototype: OpenFreeMap (OSM vector tiles) replaced by Esri raster tiles, no key. Map mode = World Street Map;
+  photo mode = Vexcel over Esri World Imagery, with Esri road + place labels on top (names down to "Nassau Hall").
+  Tested on emulated iPhone 13 Pro: Princeton map + photo, LA photo. Raster labels are a bit soft at 3x.
+  Note: Esri's credits still mention OSM for some areas; fully OSM-free would be Google Map Tiles API (key + billing).
+- Photo-match design: Nominatim/Overpass replaced by Google: Gemini Grounding with Google Maps + Places API (New) Text
+  Search for coordinates, Place Photos (ground-level, same kind of photo as the user's). Key: GOOGLE_MAPS_API_KEY;
+  no key -> Esri World Geocoder. README row added.

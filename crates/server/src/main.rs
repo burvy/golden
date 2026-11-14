@@ -7,7 +7,7 @@
 //!       200 {"time":"2026-06-22T03:07:41Z","azimuth_deg":299.33}
 //!       400 bad/missing query params, 422 no sunset that day (polar day/night)
 //!   GET /api/tiles/vexcel/{z}/{x}/{y}       Vexcel aerial map tile (proxy + cache), 204 where none
-//!   GET /proto/map                          map prototype: basemap + Vexcel + day/night shading + time slider
+//!   GET /proto/map                          map prototype: Esri map/photo + Vexcel + day/night shading + time slider
 
 use axum::{
     Json, Router,

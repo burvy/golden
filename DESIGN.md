@@ -32,7 +32,10 @@ WebGL in mobile Safari.
 
 ### Map feature (tested 11/14, see "Map: test results" below)
 - **Layers, bottom to top:**
-  1. Global basemap: OpenFreeMap (free, no key, vector tiles), so the map works everywhere, including Princeton.
+  1. **Street map (Map mode): Esri World Street Map** (raster, no key, worldwide). Switched from OpenFreeMap /
+     OpenStreetMap 11/14 because OSM was too patchy. Esri's data is mostly commercial (HERE, Garmin, USGS); its
+     credits still list OSM for some areas, so it's better, not 100% OSM-free. Fully OSM-free upgrade: Google Map
+     Tiles API (needs `GOOGLE_MAPS_API_KEY` with billing), same layer slot.
   2. **Fallback aerial photo everywhere else: Esri World Imagery** (free, no key, good to ~z19; tested 200 at
      Princeton). Attribution "Esri, Maxar, Earthstar Geographics" is required and shown. Free use is fine for a
      hackathon demo; production needs an ArcGIS account (or switch to EOX Sentinel-2 cloudless, which is free but
@@ -40,6 +43,8 @@ WebGL in mobile Safari.
   3. Vexcel aerial photos (ortho tiles) on top, wherever Vexcel gives us imagery: sharper and newer than Esri.
      The phone gets them through our server (`/api/tiles/vexcel/{z}/{x}/{y}`), never with the key. Where there
      is none, the server answers 204 and the fallback photo shows through.
+  - **Labels on the photo:** Esri `Reference/World_Transportation` (roads, numbers) and
+    `Reference/World_Boundaries_and_Places` (names down to single buildings: "Nassau Hall", "Whig Hall").
   4. Day/night shading (below).
   5. Sun line (where the sun is now, yellow) and sunset line (where it will set, dashed orange) from the map centre.
 - **Day/night shading:** for a grid of points on the screen we compute the sun's elevation at that place and
@@ -66,12 +71,13 @@ WebGL in mobile Safari.
 | North America, z2 | edge of LA/Houston only | Shading shows the sunset line sweeping across the continent. |
 | Princeton, z17, with fallback | no (204) | **Esri aerial photo** of campus + labels + sun lines. Loads in ~5 s. |
 | Downtown LA, z17, with fallback | yes | Vexcel photo on top (Esri hidden under it). |
+| Princeton z16/z17, Esri street map + labels (11/14) | no (204) | Map mode: Esri street map. Photo mode: Esri photo with road and building names. No OpenFreeMap/OSM left. |
 
 **Vexcel does not work everywhere with our key.** It is geofenced: greater LA (incl. Santa Monica, Pasadena,
 Long Beach, Irvine) and greater Houston (incl. Galveston) return imagery; Princeton, NYC, Philadelphia, Chicago,
 San Diego, Austin, rural Kansas and London return **403 Forbidden** (access, not "no imagery"). Even asking what
 imagery exists at Princeton is 403. Zoomed out, Vexcel tiles are black outside coverage, so we only show the
-Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on the basemap plus the Esri fallback photo; the bird's-eye photos,
+Vexcel layer from zoom 12 up. **Consequence:** the app works everywhere on Esri's street map and photo; the bird's-eye photos,
 obliques, heights (and so "when do buildings hide the sun") work only in LA and Houston. The demo is in LA.
 **Heights now have a US-wide backup** (USGS LiDAR, next section), so horizons and "when do buildings hide the
 sun" also work in Princeton.
@@ -147,15 +153,24 @@ sub-agents, scratch files), in a small Python service next to the Rust server.
      degrees (from the horizon line and the estimated field of view), focal length / field of view,
      camera height (ground, rooftop, drone), and season clues (leaves, clothes).
 2. **Find candidate places** (sub-agent `scout`), wide to narrow:
-   - **Landmarks:** Gemini with **Google Search grounding** names them; we geocode them (Nominatim or
-     OpenStreetMap). Model text alone is never trusted for coordinates.
+   - **Landmarks:** Gemini with **Google Search grounding** names them. Coordinates come from the **Google
+     Places API (New) Text Search** (place ID + lat/lon), never from the model's text. No OpenStreetMap /
+     Nominatim (too patchy).
    - **Vexcel image similarity search** (`/v2/embedding/extract`, LA/Houston): search by `search-text` (for
      example "pier with ferris wheel over the ocean") and by `search-image` (the user's photo or a crop) inside
      the area, `product-type=oblique`. Returns places whose aerial photos look similar. Caveat: the user's
      photo is from the ground and Vexcel's are from the air. **Test early** whether image search works across
      that gap; text search is the safe default.
-   - **Map features** (OpenStreetMap / Overpass): viewpoints, piers, peaks, rooftop bars, parks with a
-     western view.
+   - **Places that look right** (Google, replaces OpenStreetMap / Overpass): Gemini **Grounding with Google
+     Maps** to ask "scenic viewpoints / piers / rooftop bars with a western view near X", then Places Text Search
+     for their coordinates. **Place Photos** are the big win: Google has visitors' ground-level photos of each
+     place, the same kind of photo as the user's (Vexcel's are from the air), so Gemini can compare like with like
+     before we spend renders on a candidate.
+   - **Key and cost:** `GOOGLE_MAPS_API_KEY` in `env/.env` (a Google Cloud key with Places API (New) enabled and
+     billing on; it can be the same project as the Gemini key). Free monthly caps per SKU (checked 11/14, verify on
+     Google's pricing page): Text Search Pro ~5,000, Place Photos ~1,000. Plenty for a hackathon; cache every
+     response. Maps grounding is billed per grounded prompt (about $25 per 1,000 per secondary reporting,
+     unverified). Without the key: Esri's World Geocoder (no key) for landmark coordinates, no place photos.
    - **CoStar:** buildings at a candidate whose roof height matches the camera height ("shot from about the 20th floor").
 3. **Place the camera** (sub-agent `surveyor`): for each candidate, solve where the camera stands and which way
    it points.
@@ -243,7 +258,7 @@ something; an **agent** that reasons, plans and acts (not a chat wrapper); spati
 | CoStar | **Not started.** Kit is not on any machine we've checked (`COSTAR_KIT_DIR` unset) | `crates/costar`: load the kit, `/api/buildings` near a spot. Then *use* it (below) |
 | Matterport | Not started | Stretch: show the inside of the building you'd shoot from (tour link on the spot card) |
 | Agent | Contract only (`POST /api/agent`) | The tool loop, with its plan and steps visible in the app |
-| Where | Data exists **only for LA and Houston** (Vexcel and CoStar) | **Demo in downtown LA.** Princeton shows the basemap only |
+| Where | Vexcel and CoStar exist **only for LA and Houston** | **Demo in downtown LA.** Princeton: Esri map and photo, USGS LiDAR heights |
 
 **How the layers combine (this is the 30% "use of data"; it can't be decoration):**
 1. **Vexcel height map → which roofs actually see the sunset**, and until what minute buildings hide the sun.

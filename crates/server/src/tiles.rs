@@ -2,7 +2,7 @@
 //!
 //! The phone never sees the Vexcel key: it asks us for `/api/tiles/vexcel/{z}/{x}/{y}` and we fetch,
 //! cache and pass the tile on. Where Vexcel has nothing for us (outside LA / Houston for our key)
-//! we answer 204, and MapLibre just shows the basemap underneath.
+//! we answer 204, and MapLibre shows the Esri imagery layer underneath.
 
 use std::sync::Arc;
 

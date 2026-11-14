@@ -58,7 +58,7 @@ Server: `http://localhost:8787` (`crates/server`). All `GET` parameters are quer
 | `GET /api/buildings` | `BuildingList` | CoStar buildings near a point (who to ask for access) |
 | `GET /api/buildings/{id}` | `Building` | One building |
 | `POST /api/agent` | `CallSheet` | Free-text brief in, call sheet out (the agent) |
-| `GET /api/tiles/vexcel/{z}/{x}/{y}` | JPEG/PNG tile, or **204** | Vexcel aerial map tiles for MapLibre (XYZ, z0–21). 204 = no imagery for us here: show the basemap. 400 for an impossible tile. `Cache-Control` 7 days. |
+| `GET /api/tiles/vexcel/{z}/{x}/{y}` | JPEG/PNG tile, or **204** | Vexcel aerial map tiles for MapLibre (XYZ, z0–21). 204 = no imagery for us here: show the fallback (Esri World Imagery). 400 for an impossible tile. `Cache-Control` 7 days. |
 
 **Errors** (every endpoint): JSON `ApiError` `{"error": "human-readable message"}` with status:
 
