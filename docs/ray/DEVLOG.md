@@ -36,3 +36,33 @@ Ours matches NOAA within 1 s and 0.01° of azimuth.
 - The time is UTC only. Showing local time (PDT) needs a time zone. Either the web app converts it, or the
   API takes a `tz` param. This needs agreeing on in `docs/contracts.md`, which doesn't exist yet.
 - This is sunset over a *flat* horizon. Buildings come later (horizon from the Vexcel DSM).
+
+## 11/14/26: real API endpoints + fixture stubs (branch `server/endpoints`)
+
+(Gogi here: this devlog lives under `docs/ray/` for now.)
+
+**What the server answers now** (all shapes from `docs/contracts.md`, errors are `{"error": ...}`):
+- `GET /api/sun`: the real `SunPath`: local times with the offset, sunrise/sunset, morning and evening golden
+  hour, points every `step_min`. Replaces the old `{time, azimuth_deg}` answer. 422 on polar day/night.
+- `GET /api/horizon`: height map around the point (Vexcel, else USGS LiDAR) -> burvy's `core::horizon`, plus
+  `core::sunblock` when `date` is given.
+- `POST /api/search`: height map of the area + 1500 m (so the skyline is seen from the area's edge) ->
+  `core::search`. Roof spots get `building_id` = the nearest CoStar building within 50 m.
+- `GET /api/buildings`, `/api/buildings/{id}`: from Kinesiology's `costar` crate. 503 if the server has no kit.
+- `GET /api/scene` (+ `.bin`), `GET /api/photo`, `POST /api/agent`: still fixtures, header `x-golden-stub`.
+- `GOLDEN_STUBS=1`: every endpoint answers with its fixture (frontend work with no keys, kit or network).
+- `GOLDEN_ADDR` overrides `127.0.0.1:8787`. CORS is open so the web app can run on another local port.
+
+**How sunrise and golden hour are found.** Sample the sun's apparent elevation every 5 min over the local day,
+and bisect every crossing of a level to the second: -0.436° (top edge on the horizon, same as core's `sunset`
+and `sunblock`), -4° and +6°. LA 21 June: sunset 20:07:41 (NOAA, to the second), sunrise 05:42:04 (NOAA's
+sunrise formula says 05:42:12; 05:42:04 is when NOAA's own sun position crosses, and what core uses),
+evening golden hour 19:31:27–20:25:54. The fixture's 19:19:40–20:24:20 was made up.
+
+**Speed (live, downtown LA, 200 m roof search).** First call 157 s (downloads ~3.4 km of Vexcel), then 23 s
+from the disk cache. That was too slow, so the server now keeps the last 3 grids in memory and reuses one
+for any request inside it: the same search again takes 0.18 s, and a horizon inside the area 0.06 s.
+Pre-fetch the demo area once after starting the server.
+
+**For the frontend:** `web/index.html` still calls some old/mock shapes (`/api/spot/horizon`, a `sun`
+answer that's an array, `brief` as a string in search). The real shapes are in `docs/contracts.md`.

@@ -110,7 +110,7 @@ impl Grids {
             return Ok(g.clone());
         }
         let radius = fetch_radius(need_m);
-        let g = Arc::new(heights::get_dsm(lat, lon, radius).await?);
+        let g = heights::get_dsm(lat, lon, radius).await?;
         held.insert(0, g.clone());
         held.truncate(MAX_GRIDS);
         Ok(g)
