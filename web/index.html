@@ -172,14 +172,16 @@ const REAL={
   return r.buildings.map(b=>{const c=b.contacts[0];return{name:b.name||b.address||'Unnamed building',height_m:b.height_m,floors:b.floors??'?',
    contact:c?[c.role,c.name||c.company,c.phone||c.email].filter(Boolean).join(' · '):'No contact listed',matterport_id:b.matterport[0]?.id||null}})}};
 /* A call-sheet spot as a list row. */
+/* The server's why/summary lines write 24-hour times (16:36); show them like the rest of the page (4:36 PM). */
+const t12=v=>String(v??'').replace(/(?<![\d:+-])([01]?\d|2[0-3]):([0-5]\d)(?![\d:]|\s*[AP]M)/g,(_,h,m)=>`${+h%12||12}:${m} ${+h<12?'AM':'PM'}`);
 function spotUI(x){const s=x.spot;return{id:`#${s.rank} ${s.standing==='roof'?'Roof':'Street'} · ${x.role}`,lat:s.lat,lon:s.lon,height_m:Math.round(s.ground_m),eye_m:s.eye_m,standing:s.standing,
- score:s.score,sun_visible_until:s.sun.hidden_at||s.sun.flat_sunset,why:s.why.join('. '),arrive_by:x.arrive_by}}
-function sheetText(sh){const L=[sh.title,'',sh.summary,'','Timeline'];
+ score:s.score,sun_visible_until:s.sun.hidden_at||s.sun.flat_sunset,why:t12(s.why.join('. ')),arrive_by:x.arrive_by}}
+function sheetText(sh){const L=[sh.title,'',t12(sh.summary),'','Timeline'];
  for(const t of sh.timeline)L.push(`  ${clk(t.t)}  ${t.what}`);
- L.push('','Spots');for(const x of sh.spots)L.push(`  ${x.role==='primary'?'Primary':'Backup'}: ${x.spot.lat.toFixed(5)}, ${x.spot.lon.toFixed(5)} (${x.spot.standing}). Arrive by ${clk(x.arrive_by)}.`,...x.notes.map(n=>'    '+n));
+ L.push('','Spots');for(const x of sh.spots)L.push(`  ${x.role==='primary'?'Primary':'Backup'}: ${x.spot.lat.toFixed(5)}, ${x.spot.lon.toFixed(5)} (${x.spot.standing}). Arrive by ${clk(x.arrive_by)}.`,...x.notes.map(n=>'    '+t12(n)));
  if(sh.access.length){L.push('','Access');for(const a of sh.access)L.push(`  ${a.building_name||a.building_id}: ${a.contact?[a.contact.name,a.contact.phone||a.contact.email].filter(Boolean).join(', '):'no CoStar contact'}`,`    Ask: ${a.ask}`)}
- if(sh.caveats.length){L.push('','Caveats',...sh.caveats.map(c=>'  - '+c))}
- if(sh.steps&&sh.steps.length){L.push('','What the agent did',...sh.steps.map(s=>`  ${s.tool}: ${s.summary}`))}
+ if(sh.caveats.length){L.push('','Caveats',...sh.caveats.map(c=>'  - '+t12(c)))}
+ if(sh.steps&&sh.steps.length){L.push('','What the agent did',...sh.steps.map(s=>`  ${s.tool}: ${t12(s.summary)}`))}
  L.push('',`Written by: ${sh.model}`);return L.join('\n')}
 function showApi(){const m=Object.keys(LIVE).filter(k=>!LIVE[k]);$('#api').textContent=!Object.keys(LIVE).length?'':m.length?'Sample data for '+m.join(', '):'Connected to server'}
 /* ---------- helpers on contract shapes ---------- */
@@ -216,19 +218,19 @@ const STEP={read:'Read',plan:'Plan',search:'Search',sun:'Sun',photo:'Photo',buil
 function renderSheet(){const sh=S.cs;$('#sheet').hidden=!sh&&!S.sheet;$('#sheetText').hidden=!!sh;$('#sheetText').textContent=sh?'':S.sheet;
  if(!sh){$('#cs').innerHTML=S.sheet?'<h3>Call sheet</h3>':'';return}
  const rise=sh.brief.event==='sunrise',H=(t,x)=>`<h4>${t}</h4>${x}`;
- let h=`<p class="mute" style="margin:0">Call sheet · ${esc(day(sh.brief.date))} · ${sh.model==='mock'?'planned offline':'written by '+esc(sh.model)}</p><h2>${esc(sh.title)}</h2><p style="margin:0">${esc(sh.summary)}</p>`;
+ let h=`<p class="mute" style="margin:0">Call sheet · ${esc(day(sh.brief.date))} · ${sh.model==='mock'?'planned offline':'written by '+esc(sh.model)}</p><h2>${esc(sh.title)}</h2><p style="margin:0">${esc(t12(sh.summary))}</p>`;
  h+=H('Timeline',`<ol class="tl">${sh.timeline.map(t=>`<li class="${/the shot/i.test(t.what)?'shot':''}"><time datetime="${esc(t.t)}">${esc(clk(t.t))}</time><span>${esc(t.what)}</span></li>`).join('')}</ol>`);
  h+=H('Spots',sh.spots.map((x,i)=>{const s=x.spot,sun=s.sun,when=sun.hidden_at?`Sun ${rise?'clears the skyline':'meets the skyline'} at <b>${esc(clk(sun.hidden_at))}</b>`:`Sun in view ${rise?'from':'until'} <b>${esc(clk(sun.flat_sunset))}</b>`;
   return `<div class="cs-spot ${esc(x.role)}"><div><span class="chip ${esc(x.role)}">${x.role==='primary'?'Primary':'Backup'}</span> <b>${s.standing==='roof'?'Rooftop':'Street level'}</b> · arrive by <b>${esc(clk(x.arrive_by))}</b></div>
   <div>${when} · ${sun.golden_min_visible} min of golden hour in view</div>${x.photo_url?`<img loading="lazy" alt="Aerial photo of the ${esc(x.role)} spot" src="${esc(CFG.base+x.photo_url)}" onerror="this.remove()">`:''}
-  ${x.notes.length?`<ul>${x.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}<div class="acts"><button class="btn" data-go="${i}">Show on map and view</button><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;destination=${+s.lat},${+s.lon}">Directions</a></div></div>`}).join(''));
+  ${x.notes.length?`<ul>${x.notes.map(n=>`<li>${esc(t12(n))}</li>`).join('')}</ul>`:''}<div class="acts"><button class="btn" data-go="${i}">Show on map and view</button><a class="btn" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&amp;destination=${+s.lat},${+s.lon}">Directions</a></div></div>`}).join(''));
  h+=H('Who to call',sh.access.length?sh.access.map((a,i)=>{const c=a.contact,name=a.building_name||a.building_id,subj=`Roof access request: ${name}`;
   return `<div class="who" data-b="${esc(a.building_id)}"><div><b>${esc(name)}</b>${c?` <span class="chip">${esc(c.role)}</span>`:''}</div>
   ${c?`<div>${esc([c.name,c.company].filter(Boolean).join(' · ')||'Contact on file')}</div>`:'<div class="mute">CoStar has no contact for this building.</div>'}
   <blockquote>${esc(a.ask)}</blockquote><div class="acts">${c&&c.phone?`<a class="btn call" href="${esc(telHref(c.phone))}">Call ${esc(c.phone)}</a>`:''}${c&&c.email?`<a class="btn" href="mailto:${esc(c.email)}?subject=${encodeURIComponent(subj)}&amp;body=${encodeURIComponent(a.ask)}">Email</a>`:''}<button class="btn" data-ask="${i}">Copy request</button></div><div class="more"></div></div>`}).join('')
   :`<p class="mute" style="margin:0">${sh.spots.some(x=>x.spot.standing==='roof')?'No CoStar contacts for these roofs (CoStar\'s data covers Los Angeles and Houston). See the caveats.':'Street-level spots: no access needed.'}</p>`);
- if(sh.steps&&sh.steps.length)h+=H('What the agent did',`<ol class="steps">${sh.steps.map(s=>`<li><b>${esc(STEP[s.tool]||s.tool)}</b><span>${esc(s.summary)}</span></li>`).join('')}</ol>`);
- if(sh.caveats.length)h+=H('Caveats',`<ul class="caveats">${sh.caveats.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`);
+ if(sh.steps&&sh.steps.length)h+=H('What the agent did',`<ol class="steps">${sh.steps.map(s=>`<li><b>${esc(STEP[s.tool]||s.tool)}</b><span>${esc(t12(s.summary))}</span></li>`).join('')}</ol>`);
+ if(sh.caveats.length)h+=H('Caveats',`<ul class="caveats">${sh.caveats.map(c=>`<li>${esc(t12(c))}</li>`).join('')}</ul>`);
  const cs=$('#cs');cs.innerHTML=h;
  cs.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{const s=sh.spots[+b.dataset.go].spot,sp=S.spots.find(x=>x.lat===s.lat&&x.lon===s.lon);if(sp){select(sp);$('#card').scrollIntoView({behavior:'smooth',block:'start'})}});
  cs.querySelectorAll('[data-ask]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(sh.access[+b.dataset.ask].ask);b.textContent='Copied'}catch(_){b.textContent='Select the text to copy'}setTimeout(()=>b.textContent='Copy request',1500)});
