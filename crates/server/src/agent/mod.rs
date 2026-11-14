@@ -116,14 +116,25 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
         log.add("photo", "No Vexcel aerial photos here (heights come from USGS LiDAR)");
     }
 
+    // A roof's own building (search's 40 m match, `dist_m` None), else the nearest CoStar building within
+    // NEARBY_BUILDING_M (`dist_m` set): CoStar's point is the street address, often 50-100 m from a roof on a big block.
     let buildings: Vec<Option<Building>> = picked
         .iter()
-        .map(|s| s.building_id.as_ref().and_then(|id| st.kit.and_then(|k| k.building(id))))
+        .map(|s| {
+            let kit = st.kit?;
+            match &s.building_id {
+                Some(id) => kit.building(id),
+                None if s.standing == Standing::Roof => kit.buildings_near(s.lat, s.lon, NEARBY_BUILDING_M).into_iter().next(),
+                None => None,
+            }
+        })
         .collect();
     let roofs = picked.iter().filter(|s| s.standing == Standing::Roof).count();
     if roofs > 0 {
-        let found = buildings.iter().filter(|b| b.is_some()).count();
+        let found = buildings.iter().flatten().filter(|b| b.dist_m.is_none()).count();
+        let near = buildings.iter().flatten().filter(|b| b.dist_m.is_some()).count();
         log.add("buildings", match st.kit {
+            Some(_) if near > 0 => format!("{roofs} roof spot(s); {found} on a CoStar building, {near} next to one (nearest within {NEARBY_BUILDING_M:.0} m)"),
             Some(_) => format!("{roofs} roof spot(s); {found} matched to a CoStar building"),
             None => format!("{roofs} roof spot(s); CoStar kit not loaded, so no access contacts"),
         });
@@ -364,6 +375,9 @@ fn parse_t(iso: &str) -> Option<DateTime<FixedOffset>> {
     DateTime::parse_from_rfc3339(iso).ok()
 }
 
+/// Unmatched roof spots ask the nearest CoStar building within this distance (flagged in the caveats).
+const NEARBY_BUILDING_M: f64 = 100.0;
+
 fn hhmm(iso: &str) -> String {
     parse_t(iso).map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
 }
@@ -487,7 +501,16 @@ fn assemble(
             continue;
         }
         match b {
+            // one request per building, even if several spots are on (or next to) it
+            Some(b) if access.iter().any(|a: &Access| a.building_id == b.id) => {}
             Some(b) => {
+                if let Some(d) = b.dist_m {
+                    caveats.push(format!(
+                        "Roof spot #{} isn't on a CoStar building's address point; the nearest is {} ({d:.0} m away). Check it's the right building before you call",
+                        s.spot.rank,
+                        b.name.as_deref().unwrap_or(&b.id)
+                    ));
+                }
                 let contact = b
                     .contacts
                     .iter()

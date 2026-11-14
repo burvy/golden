@@ -36,3 +36,25 @@ Ours matches NOAA within 1 s and 0.01° of azimuth.
 - The time is UTC only. Showing local time (PDT) needs a time zone. Either the web app converts it, or the
   API takes a `tz` param. This needs agreeing on in `docs/contracts.md`, which doesn't exist yet.
 - This is sunset over a *flat* horizon. Buildings come later (horizon from the Vexcel DSM).
+
+## 11/14/26: the call sheet in the app (branch `web/call-sheet`)
+
+(Gogi. My `server/endpoints` branch is dropped: Nube-Lube's commit on main covers it.)
+
+The brief box already went to `POST /api/agent`, but the answer showed as a block of plain text. Now it's a
+rendered call sheet right under the brief (web owner OK'd editing `web/index.html`):
+- headline, date, summary; **timeline** with "the shot" highlighted;
+- **spots**: primary/backup, arrive-by, when the sun meets the skyline, golden minutes, Vexcel photo, notes,
+  "Show on map and view" (opens the spot card) and Directions;
+- **who to call**: building, contact role/name/company, tap-to-call / email (the request pre-filled) / copy
+  request. It also fetches `/api/buildings/{id}` for the address, other contacts with a phone or email, and the
+  Matterport tour ("Look inside: 3D tour");
+- **what the agent did** (`CallSheet.steps`) and the caveats. "Copy as text" kept.
+- While waiting: the agent's pipeline with a pulse and a seconds counter (not live steps: that needs streaming).
+- Everything from the server is HTML-escaped (CoStar and Gemini text).
+
+**Agent fix:** in DTLA every roof spot came back with no CoStar building, so "who to call" was empty. Search
+links a roof to a building only within 40 m of CoStar's point, which is the street address, often 50–100 m from
+the roof on a big block. `Spot.building_id` stays strict; for the call sheet the agent now asks the nearest CoStar
+building within 100 m and adds a caveat with the distance ("check it's the right building"). One request per
+building. Tested live: 2 of 3 roofs got contacts (47 m, 69 m).
