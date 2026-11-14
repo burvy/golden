@@ -5,3 +5,14 @@ members = ["crates/*"]
 [workspace.package]
 edition = "2021"
 license = "MIT"
+
+# Debug builds (`cargo run`) still optimize the number-crunching: unoptimized, one brief's search takes 14-23 s
+# instead of ~2.5 s. The server crate stays at opt-level 0 so edits there rebuild quickly.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.golden-core]
+opt-level = 3
+
+[profile.dev.package.lidar]
+opt-level = 3
