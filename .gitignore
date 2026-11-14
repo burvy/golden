@@ -1,0 +1,9 @@
+env/
+.env
+.env.*
+*.env
+cache/
+target/
+*.tif
+*.tiff
+node_modules/
