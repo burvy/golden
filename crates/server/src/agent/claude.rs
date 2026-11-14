@@ -53,11 +53,26 @@ impl Claude {
         if uses_fallbacks(&self.model) {
             req = req.header("anthropic-beta", FALLBACK_BETA);
         }
+        let t0 = std::time::Instant::now();
         let resp = req.send().await.map_err(|e| format!("Claude request failed: {}", e.without_url()))?;
         let status = resp.status().as_u16();
         let v: Value = resp.json().await.map_err(|e| format!("Claude answer unreadable: {}", e.without_url()))?;
+        eprintln!("{}", timing_line(&v, t0.elapsed()));
         answer_json(status, &v)
     }
+}
+
+/// Pure: one stderr line per call (model, wall time, tokens) so latency can be measured; no content, no key.
+pub fn timing_line(v: &Value, took: Duration) -> String {
+    let u = &v["usage"];
+    format!(
+        "claude: {} {} ms, in {} out {} tokens, stop {}",
+        v["model"].as_str().unwrap_or("?"),
+        took.as_millis(),
+        u["input_tokens"].as_u64().unwrap_or(0),
+        u["output_tokens"].as_u64().unwrap_or(0),
+        v["stop_reason"].as_str().unwrap_or("?")
+    )
 }
 
 fn uses_fallbacks(model: &str) -> bool {
@@ -112,6 +127,15 @@ mod tests {
         assert_eq!(b["fallbacks"], "default");
         assert!(b.get("thinking").is_none() && b.get("temperature").is_none()); // both 400 or are moot on current models
         assert!(request_body("claude-haiku-5-5", "hi", json!({})).get("fallbacks").is_none());
+    }
+
+    #[test]
+    fn timing_line_has_model_ms_and_tokens_only() {
+        let v = json!({"model": "claude-sonnet-5-5", "stop_reason": "end_turn", "usage": {"input_tokens": 628, "output_tokens": 43},
+            "content": [{"type": "text", "text": "{\"place\": \"secret words\"}"}]});
+        let line = timing_line(&v, Duration::from_millis(1948));
+        assert_eq!(line, "claude: claude-sonnet-5-5 1948 ms, in 628 out 43 tokens, stop end_turn");
+        assert_eq!(timing_line(&json!({}), Duration::ZERO), "claude: ? 0 ms, in 0 out 0 tokens, stop ?");
     }
 
     #[test]
