@@ -38,8 +38,8 @@ mod tests {
 
     #[test]
     fn reads_key_value_lines() {
-        let t = "# keys\nVEXCEL_API_KEY=abc\nexport GEMINI_API_KEY=\"g-1\"\nEMPTY=\n";
-        assert_eq!(parse(t, "GEMINI_API_KEY").as_deref(), Some("g-1"));
+        let t = "# keys\nVEXCEL_API_KEY=abc\nexport ANTHROPIC_API_KEY=\"a-1\"\nEMPTY=\n";
+        assert_eq!(parse(t, "ANTHROPIC_API_KEY").as_deref(), Some("a-1"));
         assert_eq!(parse(t, "VEXCEL_API_KEY").as_deref(), Some("abc"));
         assert_eq!(parse(t, "EMPTY"), None);
         assert_eq!(parse(t, "MISSING"), None);

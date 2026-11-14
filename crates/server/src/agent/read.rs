@@ -1,5 +1,5 @@
 //! Pure: read a typed brief ("sun between two towers from a rooftop in Princeton, late June") into the
-//! fields of a `Brief`. This is the offline mock's "understanding", and the fallback when Gemini fails.
+//! fields of a `Brief`. This is the offline mock's "understanding", and the fallback when Claude fails.
 //! No clock: the caller passes today's local date.
 
 use chrono::{Datelike, Duration, NaiveDate, Weekday};

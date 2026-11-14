@@ -389,7 +389,7 @@ Heights for the 3D view, in rings of decreasing detail, so the phone draws ~200k
 `{"error": "lat must be in [-90, 90] and lon in [-180, 180]"}`, with a status code from the table under Endpoints.
 
 ### AgentRequest and CallSheet
-`POST /api/agent` turns a typed brief into a call sheet. The agent (Gemini when `GEMINI_API_KEY` is set, else an offline mock)
+`POST /api/agent` turns a typed brief into a call sheet. The agent (Claude when `ANTHROPIC_API_KEY` is set, else an offline mock)
 reads the text, builds a `Brief`, calls `search`, `horizon`, `buildings` and `photo` as tools, and writes the sheet.
 It can take 10–30 s; show progress in the web app.
 
@@ -441,5 +441,5 @@ Response (`CallSheet`):
 | `spots` | `role` is `"primary"` (exactly one, first) or `"backup"`. `spot` is a full `Spot`. `arrive_by` is a time. `photo_url` (or `null`) is an image from `/api/photo`. |
 | `access` | Who to ask for each roof spot. `contact` is a CoStar `Contact` (or `null` if CoStar has none). `ask` is a ready-to-send one-line request. |
 | `caveats` | Honest limits that apply to this sheet. |
-| `model` | Which model wrote it (e.g. a Gemini model id), or `"mock"`. |
+| `model` | Which model wrote it (e.g. a Claude model id such as `claude-sonnet-5-5`), or `"mock"`. |
 | `steps` | What the agent did, in order: `{tool, summary}` with `tool` one of `read`, `plan`, `search`, `photo`, `buildings`, `sun`, `write`. Show it while/after the agent works. May be empty (added 11/14; optional when parsing). |

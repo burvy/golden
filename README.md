@@ -26,7 +26,7 @@ cargo run --release -p server   # serves web/ at / and the API under /api
 ```
 Open http://localhost:8787 (phone on the same Wi-Fi: set `GOLDEN_ADDR=0.0.0.0:8787` and open the laptop's IP).
 Type a brief such as "sunset between two buildings from a rooftop in Princeton tonight" and press Find spots. The first
-search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env`; with no Gemini key
+search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env`; with no Claude key
 the agent runs as an offline mock, and opened as a file (no server) the page shows sample data.
 
 ## Test
@@ -41,14 +41,13 @@ Set these as environment variables. **Never commit their values.**
 | Variable | What for | If missing |
 |---|---|---|
 | `VEXCEL_API_KEY` | Height maps and aerial photos | Falls back to `VEXCEL_ENV_FILE`. With neither, areas already in the cache still work; new areas fail with a "no Vexcel key" error |
-| `VEXCEL_ENV_FILE` | Path to a `.env` file with the keys (`VEXCEL_API_KEY=...`, `GEMINI_API_KEY=...`), instead of setting them directly. Keep it in `env/` (gitignored) | `env/.env` (so running from the repo root just works) |
+| `VEXCEL_ENV_FILE` | Path to a `.env` file with the keys (`VEXCEL_API_KEY=...`, `ANTHROPIC_API_KEY=...`), instead of setting them directly. Keep it in `env/` (gitignored) | `env/.env` (so running from the repo root just works) |
 | `VEXCEL_CACHE_DIR` | Where downloaded Vexcel height-map tiles are kept (gitignored). A 200 m area is ~300 MB, a 1 km area ~1 GB | `cache/` in the folder you run from |
 | `LIDAR_CACHE_DIR` | Where USGS LiDAR downloads are kept (gitignored). ~20 MB per 150 m radius, ~100 MB per 1 km | `VEXCEL_CACHE_DIR`, else `cache/` |
 | `GOOGLE_MAPS_API_KEY` | Photo-match agent's place search (Places API (New): coordinates, place photos). Same `env/.env` | Landmarks via Esri's geocoder, no place photos |
-| `GEMINI_API_KEY` | Photo-match agent (planned, see DESIGN.md "Photo match"). Get one at aistudio.google.com/apikey; put it in `env/.env` | Agent off |
-| `GEMINI_MODEL` | Gemini model ID for the agent; check it with the models list (DESIGN.md "Keys") | Agent off |
+| `ANTHROPIC_API_KEY` | The agent (`POST /api/agent`) reads the brief and writes the call sheet with Claude. Get one at platform.claude.com; put it in `env/.env`. Never printed or logged | The agent runs as the offline mock (rule reader + templates; every number is the same) |
+| `GOLDEN_CLAUDE_MODEL` | Claude model ID for the agent | `claude-sonnet-5-5` |
 | `COSTAR_KIT_DIR` | Path to the CoStar data kit (kept out of git) | Building lookups use fixtures |
-| TODO: Some AI key | The scouting agent | The agent runs on an offline mock |
 
 PowerShell example (current window only):
 ```powershell
