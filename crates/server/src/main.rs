@@ -23,6 +23,7 @@ use tower_http::services::ServeDir;
 mod agent;
 mod api;
 mod heights;
+mod mesh;
 mod scene;
 mod secrets;
 mod state;
@@ -49,7 +50,8 @@ fn app(state: Arc<state::AppState>) -> Router {
     Router::new()
         .route("/api/health", axum::routing::get(|| async { "ok" }))
         .merge(api::routes(state.clone()))
-        .merge(agent::routes(state))
+        .merge(agent::routes(state.clone()))
+        .merge(mesh::routes(state))
         .merge(tiles::routes())
         .fallback_service(ServeDir::new(web))
 }

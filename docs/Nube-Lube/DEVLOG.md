@@ -163,3 +163,30 @@
   sample the ground beside the tree), median filter, physical sky + shadows + haze + night windows.
 - Wired into the current web/index.html (old simple view stays as the offline fallback). Suu's web/map branch not
   supported (user: outdated, and it brings OSM back).
+
+11/14/26, late - Vexcel 3D mesh in the 3D view (LA/Houston) - HANDOFF, needs a faster machine to finish
+- User: the height-map 3D view is too low quality; wants Google-Maps-like realism, using Vexcel wherever possible
+  (sponsor). Vexcel's textured mesh (3D Tiles) exists for our key only in LA (Downey 2020-21) and Houston 2023;
+  Princeton has none (checked `/v2/3d/collections`). No GOOGLE_MAPS_API_KEY in env/.env yet, so Google 3D tiles untested.
+- Mesh data is good: tree goes to zoom 20 (geometric error 0.75 m), 1024-2048 px KTX2 textures per tile (~0.15-0.3 m/px).
+- Built (compiles; release server ran with it; `cargo test -p vexcel mesh` 5/5 passed):
+  - `crates/vexcel/src/mesh.rs`: cached pass-through (`cache/vexcel/mesh/`), `rewrite_json` (absolute URLs -> proxy;
+    adds `tileset.json` / `tile.glb` extensions because the viewer picks loaders by extension), `strip_ext`,
+    `trim_tileset` (drop children outside a radius), `covering` (collection at a point).
+  - `crates/server/src/mesh.rs`: `GET /api/mesh/at?lat&lon` -> {collection, tileset_url, attribution} or 404;
+    `GET /api/mesh/near/{lat}/{lon}/{r}/{tileset.json|tile.glb}?...` (trimmed to r = 3000 m; without the trim the
+    viewer loaded coarse tiles for the whole LA basin first). Wired in main.rs.
+  - `web/js/meshview.js`: three r160 + 3d-tiles-renderer 0.3.39 (import map in index.html), Draco + KTX2, mesh placed
+    in the spot's ENU frame, eye = raycast to the mesh + 1.7 m, unlit photo graded by sun elevation, physical sky.
+  - `web/index.html` build3D: `/api/mesh/at` -> meshview, else realview.js (height map + Vexcel photos, Princeton).
+- Tested headless (software GL, slow CPU): tiles stream, ground found (~57 m at 34.0505,-118.2545), 0 failed tiles.
+  NOT yet seen on screen: my test harness mounted the view off-screen (mount() sets the host to position:relative).
+- TODO for whoever picks this up:
+  1. Run `cargo test --workspace`, `cargo run --release -p server`, open the app, brief "sunset between two towers from
+     a rooftop in downtown LA tonight", open the 3D tab. Check it looks right (orientation: x east, y up, z south).
+  2. Tune `tiles.errorTarget` (now 6) and the lruCache sizes for phones; check memory on an iPhone 13 Pro.
+  3. Grading/sky in meshview `setSun` was not tuned visually yet.
+  4. Houston: same path, untested.
+  5. Princeton stays on realview.js unless Vexcel releases a mesh (ask mentors for the collection name) or a Google
+     key with Map Tiles API is added (3d-tiles-renderer has GoogleCloudAuthPlugin).
+  6. Update docs/contracts.md with /api/mesh/* (not done: contract change goes in its own small PR).

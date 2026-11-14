@@ -115,6 +115,10 @@ grid from ~700 MB to ~56 MB.
   (NAVD88), Vexcel's are on its own datum, so never mix the two in one grid.
 Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothing in the code changes.
 
+### Street view: Vexcel 3D mesh where it exists (11/14 late, in progress: see docs/Nube-Lube/DEVLOG.md handoff)
+- LA and Houston: Vexcel's photographed mesh (3D Tiles) through `/api/mesh/*`, rendered by `web/js/meshview.js`.
+- Elsewhere (Princeton): the height-map view below.
+
 ### Street view: built 11/14 late (`web/js/realview.js`)
 - **Vexcel 3D mesh checked first:** `/v2/3d/collections` lists only LA (Downey 2020-21) and Houston 2023 for our key;
   the Princeton collection returns 404/403 for 3D. So the view is built from what Princeton does have.

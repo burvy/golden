@@ -2,6 +2,8 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>golden – spot search client</title>
+<!-- modules for the Vexcel 3D mesh view (js/meshview.js); the rest of the page uses the global three r128 -->
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/examples/jsm/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/","3d-tiles-renderer":"https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.39/src/index.js"}}</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
 <style>
 :root{--bg:#eceff4;--panel:#fafbfd;--ink:#1b2233;--mute:#5d677c;--line:#d3d9e4;--sun:#e8591a;--teal:#2a6f7b;--blk:#c9d0dd;--blk2:#b7c0d0;
@@ -210,8 +212,14 @@ function build3D(c){const host=$('#v3'),sp=S.sel;if(!host)return;const key=sp.la
  if(RV&&RVkey===key){RV.mount(host);sun3D();return}
  if(RVwait&&RVkey===key){host.innerHTML='<div class="msg" style="color:#fff">Building the 3D city…</div>';return}
  if(RV){RV.dispose();RV=null}RVkey=key;host.innerHTML='<div class="msg" style="color:#fff">Loading the 3D city…</div>';
- RVwait=import('./js/realview.js').then(m=>m.create({host,base:CFG.base,lat:sp.lat,lon:sp.lon,eyeM:sp.eye_m??null,yaw:c.az,desktop:innerWidth>900,
-   onStatus:t=>{const h=$('#v3');if(h&&t&&!h.querySelector('canvas'))h.innerHTML=`<div class="msg" style="color:#fff">${t}</div>`}}))
+ const onStatus=t=>{const h=$('#v3');if(h&&t&&!h.querySelector('canvas'))h.innerHTML=`<div class="msg" style="color:#fff">${t}</div>`};
+ RVwait=(async()=>{
+  // Vexcel's photographed 3D mesh where it exists (LA, Houston); else Vexcel heights + aerial photos (realview.js)
+  let at=null;try{const r=await fetch(`${CFG.base}/api/mesh/at?lat=${sp.lat}&lon=${sp.lon}`);if(r.ok)at=await r.json()}catch(_){}
+  if(at){try{const m=await import('./js/meshview.js');return await m.create({host,base:CFG.base,lat:sp.lat,lon:sp.lon,yaw:c.az,tilesetUrl:at.tileset_url,attribution:at.attribution,onStatus})}
+   catch(e){console.warn('golden: Vexcel mesh view failed, using the height-map view:',e.message)}}
+  const m=await import('./js/realview.js');
+  return m.create({host,base:CFG.base,lat:sp.lat,lon:sp.lon,eyeM:sp.eye_m??null,yaw:c.az,desktop:innerWidth>900,onStatus})})()
   .then(v=>{RVwait=null;if(RVkey!==key){v.dispose();return}RV=v;const h=$('#v3');if(h)v.mount(h);sun3D()})
   .catch(e=>{RVwait=null;RVkey='';console.warn('golden: realistic 3D failed, using the simple view:',e.message);if(S.d.scene)buildSimple(c)})}
 function bigButton(){const v=document.querySelector('.view');if(!v||v.querySelector('#bigbtn'))return;const b=document.createElement('button');b.id='bigbtn';
