@@ -1,0 +1,15 @@
+[package]
+name = "costar"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Loads the CoStar kit (local JSONL, never in git) and finds buildings near a point: height, floors, contacts, Matterport"
+
+[dependencies]
+contracts = { path = "../contracts" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
