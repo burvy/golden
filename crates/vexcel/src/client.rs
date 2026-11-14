@@ -1,4 +1,4 @@
-//! HTTP to Vexcel's DSM extract, with backoff. The key goes in the `X-API-KEY` header only,
+//! HTTP to Vexcel, with backoff. The key goes in the `X-API-KEY` header only,
 //! never in a URL or an error message.
 
 use std::time::Duration;
@@ -8,24 +8,30 @@ use crate::tiles::{tile_wkt, TileId};
 use crate::Error;
 
 pub const DSM_URL: &str = "https://api.vexcelgroup.com/v2/dsm/extract";
+pub const OBLIQUE_URL: &str = "https://api.vexcelgroup.com/v2/oriented/extract";
 const MAX_ATTEMPTS: u32 = 6;
 
 pub fn http() -> Result<reqwest::Client, Error> {
     Ok(reqwest::Client::builder().timeout(Duration::from_secs(180)).build()?)
 }
 
-/// Fetch one tile's GeoTIFF. Retries 429 / 5xx / network errors with backoff.
+/// Fetch one DSM tile's GeoTIFF.
 pub async fn fetch_tile(http: &reqwest::Client, key: &ApiKey, t: TileId) -> Result<Vec<u8>, Error> {
     let wkt = tile_wkt(t);
+    get_bytes(http, key, DSM_URL, &[("wkt", wkt.as_str()), ("srid", "4326")]).await
+}
+
+/// GET a Vexcel URL and return the body. Retries 429 / 5xx / network errors with backoff.
+pub async fn get_bytes(
+    http: &reqwest::Client,
+    key: &ApiKey,
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<Vec<u8>, Error> {
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let resp = http
-            .get(DSM_URL)
-            .query(&[("wkt", wkt.as_str()), ("srid", "4326")])
-            .header("X-API-KEY", key.expose())
-            .send()
-            .await;
+        let resp = http.get(url).query(query).header("X-API-KEY", key.expose()).send().await;
         let retry_after = match resp {
             Ok(r) if r.status().is_success() => return Ok(r.bytes().await?.to_vec()),
             Ok(r) if is_retryable(r.status().as_u16()) => header_secs(&r),

@@ -66,3 +66,23 @@
 - Still TODO: CallSheet (the agent's output).
 - Next: merge Ray's `server/sun` branch (it adds `crates/core` + `crates/server` and its own root Cargo.toml, so expect conflicts),
   then make `/api/sun` match the contract.
+
+11/14/26, 11:57AM - Contract finished: `POST /api/agent` (`AgentRequest` -> `CallSheet`), the last TODO shape.
+- CallSheet = title, summary, the Brief it searched with, a timeline, primary + backup spots, who to ask for roof access
+  (with a ready-to-send one-line request), caveats, and which model wrote it ("mock" offline).
+
+11/14/26, 11:57AM - `vexcel::get_oblique(lat, lon, az_deg) -> JPEG bytes` (angled aerial photo of the view).
+- How I found the API: Vexcel publishes an OpenAPI spec at https://api.vexcelgroup.com/v2/api-docs (no key needed).
+  `/v2/oriented/extract` with a point needs `bbox-dimensions`; without it you get a misleading 404 "No image matching".
+- Obliques come in 4 directions (`product-type=oblique-north/east/south/west`). **The name is where the camera looks**: checked with
+  `/oriented/query` (camera ~3 km east of the image centre for oblique-west) and by eye (Pershing Square is at the far edge
+  looking west, the near edge looking east). So we pick the direction nearest the azimuth asked for: sunset in LA -> west.
+- Newest oblique flight over DTLA: `us-ca-losangeles-2025`, shot 1 Dec 2025 (the DSM is April 2026).
+- Request: 300 x 200 m around the point, resampled to 1024 x 683 px JPEG (~400 KB, ~1 s), newest flight first, then the photo
+  whose centre is nearest the point (least distorted). No EXIF rotation, so it displays upright as-is.
+  Vexcel's copyright line is burned into the image; leave it (licence).
+- Cached at `cache/vexcel/oblique/<facing>/<lat>_<lon>_<view>_<size>.jpg`; lat/lon rounded to ~1 m so nearby calls share it.
+  Second call: 1 ms, no key needed. Max 2048 px per side (phone budget).
+- Tests: 5 offline (direction rounding, query, validation, cache key, cache hit without key) + 1 live (ignored by default).
+- Try it: `cargo run -p vexcel --example fetch_oblique -- 34.049 -118.251 297` -> `cache/vexcel/out/oblique.jpg`.
+- Not done: capture date for `PhotoMeta.captured` (extract doesn't return it; needs an extra `/oriented/query` call) and ortho.

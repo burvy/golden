@@ -1,4 +1,5 @@
-//! vexcel: height maps (DSM) from Vexcel, cached on disk, downsampled to a ground-metre `DsmGrid`.
+//! vexcel: height maps (DSM) from Vexcel, cached on disk, downsampled to a ground-metre `DsmGrid`;
+//! and oblique aerial photos (`get_oblique`), see `oblique.rs`.
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), vexcel::Error> {
@@ -18,6 +19,7 @@ pub mod cache;
 pub mod client;
 pub mod geotiff;
 pub mod grid;
+pub mod oblique;
 pub mod resample;
 pub mod tiles;
 
@@ -25,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use contracts::{DsmGrid, DsmMeta, DsmSource, NODATA};
+pub use oblique::{get_oblique, get_oblique_with, Facing, Oblique, ObliqueOptions};
 
 use auth::ApiKey;
 use resample::GridSpec;
