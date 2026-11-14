@@ -154,3 +154,12 @@
   instead of Overpass/OSM. Mock fallbacks kept.
 - Tested headless at Princeton: hero buildings in 2–5 s, agent sheet in 15–20 s, skyline + 3D + Vexcel oblique live.
 - Not done: CoStar kit not on this machine (contacts empty), Gemini and Google Maps keys not in yet, photo `kind=ortho`.
+
+11/14/26, late - Realistic 3D view (web/js/realview.js)
+- User: the 3D view was grey and unrealistic. Asked to use Vexcel's Princeton mesh: checked `/v2/3d/collections` and the
+  tileset: only LA and Houston for our key (Princeton 3D: 404/403). Told the user; built from heights + photos instead.
+- First try (blocks per cell) looked like columns; switched to a 1 m flat-shaded surface with the Vexcel photo draped,
+  facade-with-windows shader on steep faces, trees found from DSM bumpiness (photo greenness alone failed: canopy sides
+  sample the ground beside the tree), median filter, physical sky + shadows + haze + night windows.
+- Wired into the current web/index.html (old simple view stays as the offline fallback). Suu's web/map branch not
+  supported (user: outdated, and it brings OSM back).

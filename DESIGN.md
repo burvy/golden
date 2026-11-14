@@ -115,7 +115,18 @@ grid from ~700 MB to ~56 MB.
   (NAVD88), Vexcel's are on its own datum, so never mix the two in one grid.
 Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothing in the code changes.
 
-### Street view (not tested yet; plan and risks)
+### Street view: built 11/14 late (`web/js/realview.js`)
+- **Vexcel 3D mesh checked first:** `/v2/3d/collections` lists only LA (Downey 2020-21) and Houston 2023 for our key;
+  the Princeton collection returns 404/403 for 3D. So the view is built from what Princeton does have.
+- **What it is:** the 1 m Vexcel height map (scene rings: 1 m to 256 m, 4 m to 1 km, `detail=desktop`) as a flat-shaded
+  surface, 3x3 median to drop speckle; Vexcel aerial photo tiles draped on it (Esri where none). A shader paints steep
+  faces as facades with windows tinted by the photo, except tree canopy (found from the shape: bumpy everywhere, unlike
+  roofs), which stays foliage. Physical sky (three.js Sky, Preetham) with the sun at the slider time, sun-coloured light,
+  shadows, haze, lit windows after sunset. Drag to look, pinch/wheel to zoom, full-screen button.
+- **Limits:** walls are generic facades (not the real ones); trees are blobs; next step for LA/Houston is the real Vexcel
+  mesh (3D Tiles).
+
+### Street view (earlier plan and risks)
 - **Goal:** stand at a spot and see roughly what the camera will see, with the sun in place.
 - **Inputs we have (LA/Houston):** the Vexcel height map (6 cm), 4-direction obliques + straight-down photos,
   and **Vexcel's own textured 3D city mesh** (`/v2/3d/tileset`, 3D Tiles; LA collection 2020–21, Houston 2023).

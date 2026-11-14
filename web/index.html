@@ -35,7 +35,10 @@ button[disabled]{opacity:.6;cursor:wait}
 .card{display:grid;gap:14px}.card h2{font-size:24px}
 .view{border-radius:8px;overflow:hidden;background:#1a1f2e;min-height:200px}
 .view svg,.view canvas{width:100%;height:auto;display:block}
-#v3{height:320px;cursor:grab;touch-action:none}#v3 canvas{height:100%!important}
+#v3{height:min(62vh,520px);cursor:grab;touch-action:none;position:relative}#v3 canvas{height:100%!important}
+.view.big{position:fixed;inset:0;z-index:50;border-radius:0}.view.big #v3{height:100vh;height:100dvh}
+#bigbtn{position:absolute;right:8px;top:calc(8px + env(safe-area-inset-top,0px));z-index:51;background:rgba(10,12,20,.6);color:#fff;border-color:rgba(255,255,255,.3);font-size:13px;padding:6px 10px}
+.vwrap{position:relative}
 input[type=range]{width:100%;accent-color:var(--sun);padding:0}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.cols{grid-template-columns:1fr}}
 #photo{width:100%;border-radius:8px;display:block;min-height:140px;background:var(--blk)}
@@ -196,11 +199,24 @@ function renderCard(){const sp=S.sel,d=S.d;if(!sp){$('#card').innerHTML='<div cl
  const tm=$('#tm');if(tm)tm.oninput=e=>{S.t=+e.target.value;document.querySelector('label[for=tm]').textContent='Time: '+clk(S.t);if(S.tab==='h'&&ready&&c)document.querySelector('.view').innerHTML=pano(c);else sun3D()};
  if(c){const im=$('#photo'),fail=()=>{im.onerror=null;im.src=MOCK.photo(c.az);$('#pnote').textContent='Sample image. No Vexcel aerial photo for this spot.'};
   photoFor(sp,c.az).then(m=>{if(S.sel!==sp)return;im.onerror=fail;im.src=m.src;$('#pnote').textContent=m.note}).catch(()=>{if(S.sel===sp)fail()})}
- if(S.tab==='3'&&ready&&d.scene)build3D(c);else if(S.tab==='3'&&d.scene===false)document.querySelector('.view').innerHTML='<div class="msg err">Could not load the 3D scene.</div>'}
+ if(S.tab==='3'&&ready&&c)build3D(c);else if(S.tab==='3'&&d.scene===false)document.querySelector('.view').innerHTML='<div class="msg err">Could not load the 3D scene.</div>'}
 /* ---------- 3D: x = east, y = up, z = south. grid: row-major, row 0 north, col 0 west, centred on the spot ---------- */
 const V=(az,el,r)=>new THREE.Vector3(Math.sin(az*rad)*Math.cos(el*rad)*r,Math.sin(el*rad)*r,-Math.cos(az*rad)*Math.cos(el*rad)*r);
-let T=null;
-function build3D(c){const host=$('#v3'),sc=S.d.scene,sp=S.sel;if(!host||!sc)return;
+/* Realistic view (js/realview.js): Vexcel heights as blocks + Vexcel aerial photos + physical sky. Built once per spot,
+   re-mounted when the card re-renders. Falls back to the simple height-grid view without a server. */
+let T=null,RV=null,RVkey='',RVwait=null;
+function build3D(c){const host=$('#v3'),sp=S.sel;if(!host)return;const key=sp.lat+','+sp.lon;
+ bigButton();
+ if(RV&&RVkey===key){RV.mount(host);sun3D();return}
+ if(RVwait&&RVkey===key){host.innerHTML='<div class="msg" style="color:#fff">Building the 3D city…</div>';return}
+ if(RV){RV.dispose();RV=null}RVkey=key;host.innerHTML='<div class="msg" style="color:#fff">Loading the 3D city…</div>';
+ RVwait=import('./js/realview.js').then(m=>m.create({host,base:CFG.base,lat:sp.lat,lon:sp.lon,eyeM:sp.eye_m??null,yaw:c.az,desktop:innerWidth>900,
+   onStatus:t=>{const h=$('#v3');if(h&&t&&!h.querySelector('canvas'))h.innerHTML=`<div class="msg" style="color:#fff">${t}</div>`}}))
+  .then(v=>{RVwait=null;if(RVkey!==key){v.dispose();return}RV=v;const h=$('#v3');if(h)v.mount(h);sun3D()})
+  .catch(e=>{RVwait=null;RVkey='';console.warn('golden: realistic 3D failed, using the simple view:',e.message);if(S.d.scene)buildSimple(c)})}
+function bigButton(){const v=document.querySelector('.view');if(!v||v.querySelector('#bigbtn'))return;const b=document.createElement('button');b.id='bigbtn';
+ b.textContent=v.classList.contains('big')?'Close':'Full screen';b.onclick=()=>{v.classList.toggle('big');b.textContent=v.classList.contains('big')?'Close':'Full screen'};v.appendChild(b)}
+function buildSimple(c){const host=$('#v3'),sc=S.d.scene,sp=S.sel;if(!host||!sc)return;host.innerHTML='';
  try{if(!T){T={r:new THREE.WebGLRenderer({antialias:true}),cam:new THREE.PerspectiveCamera(62,1,1,3000),yaw:0};}}catch(e){host.innerHTML='<div class="msg" style="color:#fff">3D needs WebGL, which is not available here.</div>';return}
  const w=host.clientWidth||600,h=host.clientHeight||320;T.r.setSize(w,h);T.cam.aspect=w/h;T.cam.updateProjectionMatrix();host.appendChild(T.r.domElement);
  const s=new THREE.Scene(),n=sc.n,L=(n-1)*sc.cell_m,g=new THREE.PlaneGeometry(L,L,n-1,n-1);g.rotateX(-Math.PI/2);
@@ -210,7 +226,7 @@ function build3D(c){const host=$('#v3'),sc=S.d.scene,sp=S.sel;if(!host||!sc)retu
  T.sun=new THREE.Mesh(new THREE.SphereGeometry(26,16,16),new THREE.MeshBasicMaterial({color:0xfff2c4}));s.add(T.sun);T.dl=new THREE.DirectionalLight(0xffd9a0,1);s.add(T.dl,new THREE.AmbientLight(0x8890a8,.7));
  T.s=s;T.yaw=c.az;T.cam.position.set(0,sc.eye??sp.height_m+2,0);sun3D();
  const el=T.r.domElement;let drag=null;el.onpointerdown=e=>{drag=e.clientX;el.setPointerCapture(e.pointerId)};el.onpointerup=()=>drag=null;el.onpointermove=e=>{if(drag===null)return;T.yaw-=(e.clientX-drag)*.25;drag=e.clientX;sun3D()}}
-function sun3D(){if(!T||!T.s||!S.d.sun)return;const p=interp(S.d.sun,S.t),v=V(p.az,Math.max(p.el,-5),900);T.sun.position.copy(v);T.sun.visible=p.el>-3;T.dl.position.copy(v);T.dl.intensity=Math.max(.1,Math.min(1.2,p.el/12+.3));
+function sun3D(){if(RV&&S.d.sun){const p=interp(S.d.sun,S.t);RV.setSun(p.az,p.el);return}if(!T||!T.s||!S.d.sun)return;const p=interp(S.d.sun,S.t),v=V(p.az,Math.max(p.el,-5),900);T.sun.position.copy(v);T.sun.visible=p.el>-3;T.dl.position.copy(v);T.dl.intensity=Math.max(.1,Math.min(1.2,p.el/12+.3));
  const t=Math.max(0,Math.min(1,(p.el+4)/22)),a=mix([60,40,90],[84,140,200],t);T.s.background=new THREE.Color(`rgb(${a})`);
  const d=V(T.yaw,6,1);T.cam.lookAt(T.cam.position.clone().add(d));T.r.render(T.s,T.cam)}
 /* ---------- MOCK server (same shapes as the contract) ---------- */
