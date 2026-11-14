@@ -139,3 +139,18 @@
 - Photo-match design: Nominatim/Overpass replaced by Google: Gemini Grounding with Google Maps + Places API (New) Text
   Search for coordinates, Place Photos (ground-level, same kind of photo as the user's). Key: GOOGLE_MAPS_API_KEY;
   no key -> Esri World Geocoder. README row added.
+
+11/14/26, late - Server endpoints + agent built, frontend wired, Vexcel covers Princeton
+- Vexcel now serves Princeton (n40w74-us-nj-trenton-2026, June 2026): DSM, obliques, tiles. LiDAR stays the backup.
+- Far-field DSM tiles fetched at Vexcel `zoom=17` (~0.9 m = our coarse level): 1 km grid ~700 MB -> ~56 MB.
+- Server: /api/sun, /api/horizon, /api/search, /api/scene(+bin), /api/photo(+jpg), /api/buildings, /api/agent; grids
+  cached in memory; local times via chrono-tz; errors as ApiError JSON. Serves web/ at /.
+- Agent: read -> search (re-plan) -> sun -> photo -> buildings -> write. Gemini optional (times validated against the
+  tools); offline mock otherwise. Contract change: `CallSheet.steps` (optional), fixture updated. Fixed the sun_path
+  fixture (its points contradicted its own sunset).
+- Frontend (teammate's web/, asked for by me): adapters from the contract shapes to what the page draws; the brief now
+  goes to the agent; map uses real Vexcel/Esri tiles fitted to the searched area; aerial photo via PhotoMeta with
+  attribution; 3D view from scene ring 1 with the eye lifted above its own cell; hero 3D city from /api/scene
+  instead of Overpass/OSM. Mock fallbacks kept.
+- Tested headless at Princeton: hero buildings in 2–5 s, agent sheet in 15–20 s, skyline + 3D + Vexcel oblique live.
+- Not done: CoStar kit not on this machine (contacts empty), Gemini and Google Maps keys not in yet, photo `kind=ortho`.

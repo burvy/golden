@@ -84,5 +84,11 @@
     "Height map is from April 2026; newer buildings may be missing",
     "The backup roof's building isn't in CoStar, so there's no contact for it"
   ],
-  "model": "mock"
+  "model": "mock",
+  "steps": [
+    { "tool": "read", "summary": "Sunset, from a roof, sun between two buildings, Downtown LA, Wed 24 June" },
+    { "tool": "search", "summary": "Scored 1,600 candidates in 300 m around Downtown LA; 10 spots" },
+    { "tool": "buildings", "summary": "Primary roof is on Example Tower; leasing contact found" },
+    { "tool": "write", "summary": "Wrote the sheet" }
+  ]
 }

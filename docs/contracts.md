@@ -198,13 +198,13 @@ The sun over one local day at a place, over a **flat** horizon (refraction inclu
 ```json
 {
   "lat": 34.0522, "lon": -118.2437, "date": "2026-06-21", "tz": "America/Los_Angeles",
-  "sunrise": { "t": "2026-06-21T05:42:12-07:00", "az_deg": 60.67 },
+  "sunrise": { "t": "2026-06-21T05:42:03-07:00", "az_deg": 60.66 },
   "sunset":  { "t": "2026-06-21T20:07:41-07:00", "az_deg": 299.34 },
   "golden_hour": {
-    "morning": { "from": "2026-06-21T05:25:30-07:00", "to": "2026-06-21T06:30:10-07:00" },
-    "evening": { "from": "2026-06-21T19:19:40-07:00", "to": "2026-06-21T20:24:20-07:00" }
+    "morning": { "from": "2026-06-21T05:23:49-07:00", "to": "2026-06-21T06:18:17-07:00" },
+    "evening": { "from": "2026-06-21T19:31:28-07:00", "to": "2026-06-21T20:25:54-07:00" }
   },
-  "points": [ { "t": "2026-06-21T19:20:00-07:00", "az_deg": 293.10, "elev_deg": 5.95 } ]
+  "points": [ { "t": "2026-06-21T19:30:00-07:00", "az_deg": 294.22, "elev_deg": 6.27 } ]
 }
 ```
 
@@ -389,7 +389,7 @@ Heights for the 3D view, in rings of decreasing detail, so the phone draws ~200k
 `{"error": "lat must be in [-90, 90] and lon in [-180, 180]"}`, with a status code from the table under Endpoints.
 
 ### AgentRequest and CallSheet
-`POST /api/agent` turns a typed brief into a call sheet. The agent (Claude, or an offline mock without a key)
+`POST /api/agent` turns a typed brief into a call sheet. The agent (Gemini when `GEMINI_API_KEY` is set, else an offline mock)
 reads the text, builds a `Brief`, calls `search`, `horizon`, `buildings` and `photo` as tools, and writes the sheet.
 It can take 10–30 s; show progress in the web app.
 
@@ -428,7 +428,8 @@ Response (`CallSheet`):
     { "building_id": "costar:1234567", "building_name": "Example Tower", "contact": { "role": "leasing", "name": "Jane Doe", "company": "Example Realty", "phone": "+1 213 555 0100", "email": "jane@example.com" }, "ask": "Roof access 19:00–20:30 on 24 June for a 3-person crew, no lights" }
   ],
   "caveats": ["Height map is from April 2026; newer buildings may be missing"],
-  "model": "mock"
+  "model": "mock",
+  "steps": [ { "tool": "search", "summary": "Scored 1,600 candidates in 300 m around Downtown LA; 10 spots" } ]
 }
 ```
 
@@ -440,4 +441,5 @@ Response (`CallSheet`):
 | `spots` | `role` is `"primary"` (exactly one, first) or `"backup"`. `spot` is a full `Spot`. `arrive_by` is a time. `photo_url` (or `null`) is an image from `/api/photo`. |
 | `access` | Who to ask for each roof spot. `contact` is a CoStar `Contact` (or `null` if CoStar has none). `ask` is a ready-to-send one-line request. |
 | `caveats` | Honest limits that apply to this sheet. |
-| `model` | Which model wrote it (e.g. a Claude model id), or `"mock"`. |
+| `model` | Which model wrote it (e.g. a Gemini model id), or `"mock"`. |
+| `steps` | What the agent did, in order: `{tool, summary}` with `tool` one of `read`, `plan`, `search`, `photo`, `buildings`, `sun`, `write`. Show it while/after the agent works. May be empty (added 11/14; optional when parsing). |

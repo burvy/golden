@@ -1,7 +1,10 @@
 //! The Vexcel API key. Comes from `VEXCEL_API_KEY`, or from the file named by `VEXCEL_ENV_FILE`
-//! (a `.env` style file). It is never printed: `Debug` is redacted and there is no `Display`.
+//! (a `.env` style file), or from `env/.env` (the documented, gitignored place) when neither is set. It is never printed: `Debug` is redacted and there is no `Display`.
 
 use crate::Error;
+
+/// Where the key lives if no variable says otherwise (relative to where the server runs: the repo root).
+pub const DEFAULT_ENV_FILE: &str = "env/.env";
 
 #[derive(Clone)]
 pub struct ApiKey(String);
@@ -21,14 +24,14 @@ impl ApiKey {
         &self.0
     }
 
-    /// `VEXCEL_API_KEY` wins; otherwise read it from the file in `VEXCEL_ENV_FILE`.
+    /// `VEXCEL_API_KEY` wins; otherwise read it from the file in `VEXCEL_ENV_FILE`, else `env/.env`.
     pub fn from_env() -> Result<ApiKey, Error> {
         if let Ok(k) = std::env::var("VEXCEL_API_KEY") {
             if !k.trim().is_empty() {
                 return Ok(ApiKey(k.trim().to_string()));
             }
         }
-        let path = std::env::var("VEXCEL_ENV_FILE").map_err(|_| Error::NoKey)?;
+        let path = std::env::var("VEXCEL_ENV_FILE").unwrap_or_else(|_| DEFAULT_ENV_FILE.to_string());
         let text = std::fs::read_to_string(&path).map_err(|_| Error::NoKey)?;
         find_key(&text).map(ApiKey).ok_or(Error::NoKey)
     }

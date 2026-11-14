@@ -15,7 +15,7 @@ pub mod scene;
 pub mod search;
 pub mod sun;
 
-pub use agent::{Access, AgentRequest, CallSheet, SheetSpot, SpotRole, TimelineItem};
+pub use agent::{Access, AgentRequest, AgentStep, CallSheet, SheetSpot, SpotRole, TimelineItem};
 pub use building::{Building, BuildingList, Contact, ContactRole, Matterport};
 pub use dsm::{DsmFileError, DsmGrid, DsmMeta, DsmSource, EARTH_R, NODATA};
 pub use error::ApiError;

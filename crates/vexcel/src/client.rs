@@ -18,6 +18,10 @@ pub fn http() -> Result<reqwest::Client, Error> {
 /// Fetch one DSM tile's GeoTIFF.
 pub async fn fetch_tile(http: &reqwest::Client, key: &ApiKey, t: TileId) -> Result<Vec<u8>, Error> {
     let wkt = tile_wkt(t);
+    if t.level == crate::tiles::FAR_LEVEL {
+        let zoom = crate::tiles::FAR_ZOOM.to_string();
+        return get_bytes(http, key, DSM_URL, &[("wkt", wkt.as_str()), ("srid", "4326"), ("zoom", zoom.as_str())]).await;
+    }
     get_bytes(http, key, DSM_URL, &[("wkt", wkt.as_str()), ("srid", "4326")]).await
 }
 
