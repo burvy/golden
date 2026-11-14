@@ -43,3 +43,11 @@
   plain struct with the same fields, or we move it to a tiny shared crate later.
 - Fixture is synthetic (two towers with a gap, a roof to stand on), not real Vexcel data, to keep their licence out of git.
 - The `.env` with the key lives in `env/`, which is gitignored. Point `VEXCEL_ENV_FILE` at it.
+
+11/14/26, 11:22AM - Moved the DsmGrid type into a new shared crate, `crates/contracts`.
+- Why: `core` must stay pure and can't import `vexcel` (an IO crate), but it needs the DsmGrid type. Now both depend on `contracts`.
+- `contracts` is pure: the structs, the lat/lon to cell formula, and turning a grid into JSON + f32 bytes and back.
+- The actual file reading/writing stayed in `vexcel::grid` (`read_files`, `write_files`), because IO belongs in the IO crates.
+- Regenerated the fixture: byte-for-byte identical. Tests: 7 in contracts, 29 in vexcel, all pass. Cached fetch still works.
+- README: documented `VEXCEL_ENV_FILE` and `VEXCEL_CACHE_DIR`, filled in the height map date, added `crates/contracts` to the repo map.
+- New team rule (AGENTS.md on main): the agent no longer commits. It leaves changes uncommitted and suggests the commit.
