@@ -12,17 +12,17 @@ HackPrinceton Fall 2026 Entertainment track - CoStar "AI for the Built World"
 
 ## Run it
 
-**Prerequisites:** Rust (stable) <!--TODO Ray: Version-->, Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
+**Prerequisites:** Rust (stable) <!--TODO Gogi: Version-->, Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
 
 ```powershell
-.\build.ps1 # builds everything  <!-- TODO Ray: what is "everything" -->
+.\build.ps1 # builds everything  <!-- TODO Gogi: what is "everything" -->
 .\run.ps1 # starts the server
 ```
 Then open http://localhost:8787.
 
 Without the scripts (any OS):
 ```sh
-cargo run -p server # TODO Ray: confirm
+cargo run -p server # TODO Gogi: confirm
 ```
 
 ## Test
@@ -62,9 +62,9 @@ PhotoPills tells you where the sun is. golden tells you where to stand, and show
 | Folder | What | Owner |
 |---|---|---|
 | `crates/core` | Pure maths: coordinates, sun, horizon, scoring, search. No network, no files. | burvy |
-| `crates/vexcel` | Height map and aerial photo download, cache, downsample | Ray |
+| `crates/vexcel` | Height map and aerial photo download, cache, downsample | Gogi |
 | `crates/costar` | CoStar kit loader + building lookup | Kinesiology <!-- TODO name --> |
-| `crates/server` | HTTP API on :8787 and the agent | Ray |
+| `crates/server` | HTTP API on :8787 and the agent | Gogi |
 | `web/` | Map, brief box, spot card, 3D skyline | Frontend <!-- TODO name --> |
 | `docs/` | Contracts, pitch, Devpost, devlogs (`docs/<name>/DEVLOG.md`) | everyone |
 | `fixtures/` | One sample file per data shape in `docs/contracts.md` | everyone |
