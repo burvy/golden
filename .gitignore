@@ -7,3 +7,4 @@ env/
 *.tif
 *.tiff
 node_modules/
+.DS_Store

@@ -1,0 +1,9 @@
+{
+  "name": "golden-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test js/adapters.test.js",
+    "build": "node --test js/adapters.test.js && node --check js/adapters.js && node --check js/geo.js && node --check js/api.js && node --check js/mock.js && node --check js/map.js && node --check js/scene3d.js && node --check js/app.js && node --check golden-hero.js"
+  }
+}
