@@ -86,3 +86,19 @@
 - Tests: 5 offline (direction rounding, query, validation, cache key, cache hit without key) + 1 live (ignored by default).
 - Try it: `cargo run -p vexcel --example fetch_oblique -- 34.049 -118.251 297` -> `cache/vexcel/out/oblique.jpg`.
 - Not done: capture date for `PhotoMeta.captured` (extract doesn't return it; needs an extra `/oriented/query` call) and ortho.
+
+11/14/26, 12:28PM - App design (v2) in DESIGN.md, and a tested map prototype.
+- **Vexcel as the map**: `vexcel::ortho::OrthoTiles` fetches XYZ photo tiles (`/v2/ortho/tile`), caches them, and also caches
+  "no imagery" answers. Server proxies them at `/api/tiles/vexcel/{z}/{x}/{y}` (204 = none) so the key never reaches the phone.
+- **Does it work everywhere? No.** Our key is geofenced: greater LA and greater Houston only. Princeton, NYC, Philly, Chicago,
+  San Diego, Austin, Kansas, London: 403 Forbidden (even the "what imagery exists here" call). So the app uses a free global
+  basemap (OpenFreeMap) and lays Vexcel photos on top where we have them (zoom 12+; below that Vexcel tiles are black outside coverage).
+- **Shading**: sample the sun's elevation on a ~24 x 50 grid of screen points, tint by it (gold / blue / navy), stretch over the map.
+  Zoomed out you see the sunset line sweep across the continent; zoomed into a city it's uniform, which is physically right.
+- **Prototype**: `/proto/map` (crates/server/static/proto_map.html), MapLibre 4.7.1 + OpenFreeMap + Vexcel + shading + sun/sunset
+  lines + 0-24 h slider. Tested in headless Edge emulating an iPhone 13 Pro (390x844 @2-3x, touch) via the DevTools protocol:
+  LA golden hour / night with Vexcel photos, Princeton with basemap only, North America zoomed out. Loads in ~5 s cold.
+  Bugs found and fixed while testing: times in the browser's zone (now the place's `tz`), basemap 3D buildings drawn over the
+  Vexcel photo (hidden now), "next sunset" not saying it was tomorrow's.
+- Found Vexcel's textured 3D city mesh (`/v2/3d/tileset`, LA 2020-21, Houston 2023): good base for "street view" before splats.
+- **Weather**: Open-Meteo (free, no key, low/mid/high cloud split, aerosols). Tested for Princeton.
