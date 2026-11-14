@@ -7,7 +7,7 @@ path, Vexcel's aerial photo of the view, and the CoStar building with who to ask
 **Pitch:** PhotoPills tells you where the sun is. golden tells you where to stand, and shows you the shot,
 in a city full of buildings.
 
-HackPrinceton F26, 24 h. Tracks: Entertainment (main), CoStar "AI for the Built World" (needs 2 of
+HackPrinceton F26, 24 h. Tracks (details in "Prize tracks" below): Entertainment (main), CoStar "AI for the Built World" (needs 2 of
 Vexcel / CoStar / Matterport, plus an agent), Amazon Practical AI, Peri Forward Deployed (needs a real
 business or club consulted, e.g. a campus film club).
 
@@ -95,6 +95,50 @@ Ask Vexcel at the hackathon whether the key can include Princeton; if so, nothin
 - Map: the shading uses one tiny canvas stretched over the map (no per-frame WebGL work); tiles cached by the
   browser for a week. Street view: ≤ ~200k height cells or ≤ ~1M splats per scene.
 - The server binds to 127.0.0.1; to try it on a real phone on the same Wi-Fi it must bind 0.0.0.0 (TODO).
+
+## Prize tracks: what each one needs from us (11/14)
+**Must-have: CoStar "Inside and Out: AI for the Built World".** Judged on: data use 30%, agentic depth 30%,
+usefulness 25%, demo 15%. Hard rules: at least **two of** CoStar / Matterport / Vexcel, combined so each adds
+something; an **agent** that reasons, plans and acts (not a chat wrapper); spatial and visual.
+
+| Requirement | Where we are | What we must still build |
+|---|---|---|
+| Vexcel | **Done**: height map (`get_dsm`), obliques (`get_oblique`), map tiles, 3D mesh found | Horizon + "when buildings hide the sun" (core) |
+| CoStar | **Not started.** Kit is not on any machine we've checked (`COSTAR_KIT_DIR` unset) | `crates/costar`: load the kit, `/api/buildings` near a spot. Then *use* it (below) |
+| Matterport | Not started | Stretch: show the inside of the building you'd shoot from (tour link on the spot card) |
+| Agent | Contract only (`POST /api/agent`) | The tool loop, with its plan and steps visible in the app |
+| Where | Data exists **only for LA and Houston** (Vexcel and CoStar) | **Demo in downtown LA.** Princeton shows the basemap only |
+
+**How the layers combine (this is the 30% "use of data"; it can't be decoration):**
+1. **Vexcel height map → which roofs actually see the sunset**, and until what minute buildings hide the sun.
+2. **CoStar → is that roof a real building we can get onto**: its height and floors (cross-checked against the
+   Vexcel roof height), property type, and **who to contact** (manager/leasing). Available space and leases are
+   a bonus: a vacant top floor or an amenity deck is a place you can actually rent for a shoot.
+3. **Vexcel oblique → what the view looks like** toward the sunset from there.
+4. **Matterport → the inside**: the room or terrace you'd shoot from.
+5. **The agent ties them together:** turns the brief into a search, ranks spots, checks the weather outlook,
+   drops spots with no access contact, and writes the call sheet with ready-to-send access requests. If the
+   weather is poor it re-plans for another day. **Show its steps in the app** (agentic depth = 30%).
+
+**Real-estate angle (helps "usefulness"):** the same engine scores **any CoStar building's sunset view**. When
+does the sun drop behind neighbours, from which floor is it clear, and how many golden-hour minutes are there
+per season? That lets brokers market "west-facing, sunset view until 19:58 in June", and tells real-estate photographers when to
+book **twilight shoots** of a listing. CoStar's judges ask "would someone switch this on Monday?": brokers and listing photographers would.
+
+**Also going for:**
+- **Amazon, Best Practical AI:** fits as-is (agentic, real users, simple UX). They also score **adaptive**: the
+  agent should remember what the user liked (e.g. prefers "between towers", roofs, weekends). Must ship a working
+  demo, a clear target user, basic docs (README) and a pitch.
+- **Peri, Forward Deployed:** we must **consult a real business or club during the hackathon** and submit its
+  name, the person's name and role, and evidence (screenshot, photo, video or quote). It should be someone who
+  could use the app *now*, i.e. who shoots in **LA or Houston** (e.g. a real-estate photographer or brokerage
+  there, reached by phone/DM), or a Princeton photo/film club if we're open that their area isn't covered yet.
+  **Owner: TBD. Do this early**; their answers should shape what we build.
+- **LangChain, Best use of deepagents:** only if we build the agent with LangChain's `deepagents` (planning
+  to-do list, sub-agents, scratch files) calling our Rust API as tools. It also makes the agent visibly
+  "plan and act" for the CoStar judges. Cost: a small Python (or JS) agent service next to the Rust server.
+  **Decision needed.**
+- Not a fit: Arlequin (forensics / social networks), Physical AI (hardware).
 
 ## What we offer that PhotoPills doesn't
 PhotoPills already has sun lines, AR and alignment search ("Find"). Don't pitch those as new.
