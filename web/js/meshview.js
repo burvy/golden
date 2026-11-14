@@ -17,17 +17,30 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 
 /* How the photo is graded for the sun's elevation: [r, g, b] multipliers. */
+/* The photo is shown as-is (not tone-mapped), so these are the final colour multipliers. Tuned on screen 11/14
+ * against the LA hero roof: noon = the photo, sun low = warm, just after sunset = dim and cool, night = deep blue. */
 function grade(el) {
-  if (el > 12) return [1, 1, 1];
-  if (el > 0) { const t = el / 12; return [lerp(1.05, 1, t), lerp(.82, 1, t), lerp(.62, 1, t)]; }      // golden
-  if (el > -6) { const t = (el + 6) / 6; return [lerp(.32, 1.0, t), lerp(.3, .78, t), lerp(.42, .6, t)]; } // dusk
-  return [.18, .19, .3];                                                                                  // night
+  const s = t => t * t * (3 - 2 * t); // smoothstep 0..1
+  if (el >= 15) return [1, 1, 1];
+  if (el >= 0) { const t = s(el / 15); return [lerp(1.1, 1, t), lerp(.8, 1, t), lerp(.52, 1, t)]; }      // golden
+  if (el >= -8) { const t = s((el + 8) / 8); return [lerp(.2, .9, t), lerp(.23, .66, t), lerp(.38, .55, t)]; } // dusk
+  return [.2, .23, .38];                                                                                   // night
+}
+
+/* How much mesh to keep, by device. Measured 11/14 at the LA hero roof (desktop vs emulated iPhone 13 Pro):
+ * errorTarget is screen-space error in px (bigger = coarser tiles, fewer downloads); lruCache counts tiles kept,
+ * each ~1-2 MB of GPU texture, so the phone budget stays well under iOS Safari's WebGL memory limit. */
+function budget() {
+  const phone = matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600;
+  return phone ? { phone, errorTarget: 16, minSize: 250, maxSize: 450, pixelRatio: 1.5, jobs: 6 }
+    : { phone, errorTarget: 6, minSize: 900, maxSize: 1600, pixelRatio: 2, jobs: 12 };
 }
 
 export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl, attribution = '', onStatus = () => {} }) {
   onStatus('Loading the Vexcel 3D city…');
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  const B = budget();
+  const renderer = new THREE.WebGLRenderer({ antialias: !B.phone, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, B.pixelRatio));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = .5;
   const scene = new THREE.Scene();
@@ -35,11 +48,11 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
 
   // the mesh, in the spot's local frame: x east, y up, z south, origin on the ellipsoid under the spot
   const tiles = new TilesRenderer(base + tilesetUrl);
-  tiles.errorTarget = 6; // finer than the default: we stand in the scene, not above it
-  tiles.downloadQueue.maxJobs = 12;
+  tiles.errorTarget = B.errorTarget; // desktop finer than the default: we stand in the scene, not above it
+  tiles.downloadQueue.maxJobs = B.jobs;
   tiles.parseQueue.maxJobs = 4;
   // standing in the city needs many fine tiles at once (Vexcel goes to zoom 20, ~0.75 m geometric error)
-  tiles.lruCache.minSize = 1500; tiles.lruCache.maxSize = 3000;
+  tiles.lruCache.minSize = B.minSize; tiles.lruCache.maxSize = B.maxSize;
   const draco = new DRACOLoader().setDecoderPath(LIBS + 'draco/gltf/');
   const ktx2 = new KTX2Loader().setTranscoderPath(LIBS + 'basis/').detectSupport(renderer);
   const gltf = new GLTFLoader(tiles.manager).setDRACOLoader(draco).setKTX2Loader(ktx2);
@@ -57,7 +70,7 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
     s.traverse(o => {
       if (!o.isMesh) return;
       const old = o.material;
-      const m = new THREE.MeshBasicMaterial({ map: old.map, color: tint.clone() });
+      const m = new THREE.MeshBasicMaterial({ map: old.map, color: tint.clone(), toneMapped: false });
       old.dispose(); o.material = m; mats.add(m);
     });
   });
@@ -149,14 +162,15 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
     setYaw(y) { look.yaw = y; },
     setLook(o) { Object.assign(look, o); },
     setSun(az, elev) {
-      const dir = new THREE.Vector3(Math.sin(az * rad) * Math.cos(elev * rad), Math.sin(elev * rad), -Math.cos(az * rad) * Math.cos(elev * rad));
-      const low = clamp(1 - elev / 12, 0, 1);
-      su.sunPosition.value.copy(dir);
-      su.turbidity.value = lerp(4, 7, low); su.rayleigh.value = lerp(2.2, 3, low);
-      renderer.toneMappingExposure = elev > 0 ? lerp(.5, .42, clamp(elev / 20, 0, 1)) : lerp(.55, .9, clamp(-elev / 6, 0, 1));
-      const g = grade(elev); tint.setRGB(g[0], g[1], g[2]);
+      const low = clamp(1 - elev / 12, 0, 1), dusk = clamp(-elev / 8, 0, 1);
+      // the sky shader goes muddy below the horizon, so its sun stops 1° under it and night comes from exposure
+      const se = Math.max(elev, -1) * rad;
+      su.sunPosition.value.set(Math.sin(az * rad) * Math.cos(se), Math.sin(se), -Math.cos(az * rad) * Math.cos(se));
+      su.turbidity.value = lerp(4, 7, low); su.rayleigh.value = lerp(lerp(2.2, 3, low), 4, dusk);
+      renderer.toneMappingExposure = elev > 0 ? lerp(.5, .42, clamp(elev / 20, 0, 1)) : lerp(.55, .16, dusk);
+      const g = grade(elev); tint.setRGB(g[0], g[1], g[2], THREE.SRGBColorSpace); // display terms, not linear
       for (const m of mats) m.color.copy(tint);
-      scene.fog.color.setRGB(lerp(.77, .25, clamp(-elev / 6, 0, 1)) * g[0], lerp(.81, .25, clamp(-elev / 6, 0, 1)) * g[1], lerp(.85, .35, clamp(-elev / 6, 0, 1)) * g[2]);
+      scene.fog.color.setRGB(lerp(.77, .12, dusk) * g[0], lerp(.81, .14, dusk) * g[1], lerp(.85, .24, dusk) * g[2]);
     },
     dispose() {
       alive = false; ro.disconnect();
