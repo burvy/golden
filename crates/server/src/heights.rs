@@ -1,6 +1,6 @@
 //! One place that decides where a height map comes from, so the rest of the server just asks for a `DsmGrid`.
 //!
-//! Vexcel first (7.5 cm, recent, but our key only covers greater LA and Houston). Where Vexcel refuses
+//! Vexcel first (7.5 cm, recent, but our key only covers greater LA, Houston and Princeton). Where Vexcel refuses
 //! (403 outside the geofence), has no key, or comes back mostly empty, use USGS 3DEP LiDAR (`lidar` crate:
 //! US-wide, public, ~0.5 m, older surveys). `DsmMeta.source.provider` says which one answered.
 //! Used by /api/horizon and /api/search.

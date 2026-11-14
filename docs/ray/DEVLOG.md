@@ -66,3 +66,33 @@ Pre-fetch the demo area once after starting the server.
 
 **For the frontend:** `web/index.html` still calls some old/mock shapes (`/api/spot/horizon`, a `sun`
 answer that's an array, `brief` as a string in search). The real shapes are in `docs/contracts.md`.
+
+## 11/14/26: the call sheet in the app (branch `web/call-sheet`)
+
+(Gogi. My `server/endpoints` branch is dropped: Nube-Lube's commit on main covers it.)
+
+The brief box already went to `POST /api/agent`, but the answer showed as a block of plain text. Now it's a
+rendered call sheet right under the brief (web owner OK'd editing `web/index.html`):
+- headline, date, summary; **timeline** with "the shot" highlighted;
+- **spots**: primary/backup, arrive-by, when the sun meets the skyline, golden minutes, Vexcel photo, notes,
+  "Show on map and view" (opens the spot card) and Directions;
+- **who to call**: building, contact role/name/company, tap-to-call / email (the request pre-filled) / copy
+  request. It also fetches `/api/buildings/{id}` for the address, other contacts with a phone or email, and the
+  Matterport tour ("Look inside: 3D tour");
+- **what the agent did** (`CallSheet.steps`) and the caveats. "Copy as text" kept.
+- While waiting: the agent's pipeline with a pulse and a seconds counter (not live steps: that needs streaming).
+- Everything from the server is HTML-escaped (CoStar and Gemini text).
+
+**Agent fix:** in DTLA every roof spot came back with no CoStar building, so "who to call" was empty. Search
+links a roof to a building only within 40 m of CoStar's point, which is the street address, often 50–100 m from
+the roof on a big block. `Spot.building_id` stays strict; for the call sheet the agent now asks the nearest CoStar
+building within 100 m and adds a caveat with the distance ("check it's the right building"). One request per
+building. Tested live: 2 of 3 roofs got contacts (47 m, 69 m).
+
+**Coverage update (same branch).** Vexcel now serves Princeton (`n40w74-us-nj-trenton-2026`, flown June 2026),
+but the CoStar kit is still LA (~1,580 buildings) and Houston (~1,760) only: 0 in New Jersey. The agent now tells
+the two cases apart: if CoStar has no building within 3 km of the area, the sheet gets one caveat ("CoStar covers
+LA and Houston, not this area") and the buildings step says so, instead of "roof #n isn't matched" per spot.
+Coverage wording updated in README (Limits), DESIGN (Where), and the vexcel/server comments.
+Live: Princeton default brief, 15 s, Vexcel heights + obliques, 3 roof spots, no contacts (as expected);
+downtown LA still gets its contacts.

@@ -289,7 +289,7 @@ something; an **agent** that reasons, plans and acts (not a chat wrapper); spati
 | CoStar | **Not started.** Kit is not on any machine we've checked (`COSTAR_KIT_DIR` unset) | `crates/costar`: load the kit, `/api/buildings` near a spot. Then *use* it (below) |
 | Matterport | Not started | Stretch: show the inside of the building you'd shoot from (tour link on the spot card) |
 | Agent | Contract only (`POST /api/agent`) | The tool loop, with its plan and steps visible in the app |
-| Where | Vexcel and CoStar exist **only for LA and Houston** | **Demo in downtown LA.** Princeton: Esri map and photo, USGS LiDAR heights |
+| Where | Vexcel covers LA, Houston and Princeton; CoStar **only LA and Houston** | **Demo in downtown LA** for "who to call". Princeton: Vexcel photos and heights, no CoStar contacts |
 
 **How the layers combine (this is the 30% "use of data"; it can't be decoration):**
 1. **Vexcel height map → which roofs actually see the sunset**, and until what minute buildings hide the sun.

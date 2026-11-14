@@ -3,10 +3,11 @@
 //! What the live API does (measured 11/14/26, see docs/Nube-Lube/DEVLOG.md):
 //! - `GET /v2/ortho/tile?layer=..&zoom=z&tile-x=x&tile-y=y` returns a 256 px tile (JPEG, or PNG where
 //!   part of it has no imagery, so the edge of coverage is transparent).
-//! - Our hackathon key is geofenced to greater LA and greater Houston. Everywhere else is HTTP 403
-//!   (Princeton, NYC, Chicago, San Diego, London...). Outside coverage at low zoom the tile is black/transparent.
+//! - Our hackathon key is geofenced to greater LA, greater Houston and (since 11/14) Princeton / Trenton
+//!   (`n40w74-us-nj-trenton-2026`). Everywhere else is HTTP 403 (NYC, Chicago, San Diego, London...).
+//!   Outside coverage at low zoom the tile is black/transparent.
 //! So Vexcel can only be an overlay on top of a global basemap. "No tile" answers are cached too, so
-//! panning around Princeton doesn't hit Vexcel again and again.
+//! panning outside coverage doesn't hit Vexcel again and again.
 
 use std::path::{Path, PathBuf};
 

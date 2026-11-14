@@ -116,21 +116,39 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
         log.add("photo", "No Vexcel aerial photos here (heights come from USGS LiDAR)");
     }
 
+    // A roof's own building (search's 40 m match, `dist_m` None), else the nearest CoStar building within
+    // NEARBY_BUILDING_M (`dist_m` set): CoStar's point is the street address, often 50-100 m from a roof on a big block.
     let buildings: Vec<Option<Building>> = picked
         .iter()
-        .map(|s| s.building_id.as_ref().and_then(|id| st.kit.and_then(|k| k.building(id))))
+        .map(|s| {
+            let kit = st.kit?;
+            match &s.building_id {
+                Some(id) => kit.building(id),
+                None if s.standing == Standing::Roof => kit.buildings_near(s.lat, s.lon, NEARBY_BUILDING_M).into_iter().next(),
+                None => None,
+            }
+        })
         .collect();
     let roofs = picked.iter().filter(|s| s.standing == Standing::Roof).count();
-    if roofs > 0 {
-        let found = buildings.iter().filter(|b| b.is_some()).count();
+    let costar = match st.kit {
+        None => Costar::NoKit,
+        Some(k) if k.buildings_near(brief.area.lat, brief.area.lon, brief.area.radius_m + COSTAR_HERE_M).is_empty() => Costar::NotHere,
+        Some(_) => Costar::Here,
+    };
+    if roofs > 0 && costar == Costar::NotHere {
+        log.add("buildings", format!("{roofs} roof spot(s); CoStar has no buildings here (its data covers Los Angeles and Houston)"));
+    } else if roofs > 0 {
+        let found = buildings.iter().flatten().filter(|b| b.dist_m.is_none()).count();
+        let near = buildings.iter().flatten().filter(|b| b.dist_m.is_some()).count();
         log.add("buildings", match st.kit {
+            Some(_) if near > 0 => format!("{roofs} roof spot(s); {found} on a CoStar building, {near} next to one (nearest within {NEARBY_BUILDING_M:.0} m)"),
             Some(_) => format!("{roofs} roof spot(s); {found} matched to a CoStar building"),
             None => format!("{roofs} roof spot(s); CoStar kit not loaded, so no access contacts"),
         });
     }
 
     // 4. assemble, then write the words
-    let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, st.kit.is_some(), notes);
+    let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, costar, notes);
     let mut model = "mock".to_string();
     if let Some(g) = &gem {
         match write_with_gemini(g, &place, &sheet).await {
@@ -364,6 +382,20 @@ fn parse_t(iso: &str) -> Option<DateTime<FixedOffset>> {
     DateTime::parse_from_rfc3339(iso).ok()
 }
 
+/// Unmatched roof spots ask the nearest CoStar building within this distance (flagged in the caveats).
+const NEARBY_BUILDING_M: f64 = 100.0;
+/// CoStar "covers" a search if it has any building within this distance of the area. Its kit is LA and Houston
+/// only, so e.g. Princeton (Vexcel, but no CoStar) gets one clear caveat instead of "roof #n isn't matched".
+const COSTAR_HERE_M: f64 = 3000.0;
+
+/// Whether CoStar can say who to ask for roof spots in this search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Costar {
+    NoKit,
+    NotHere,
+    Here,
+}
+
 fn hhmm(iso: &str) -> String {
     parse_t(iso).map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
 }
@@ -416,7 +448,7 @@ fn assemble(
     photos: &[Option<String>],
     buildings: &[Option<Building>],
     source: &DsmSource,
-    have_kit: bool,
+    costar: Costar,
     replan_notes: Vec<String>,
 ) -> CallSheet {
     let golden = golden_of(path, brief.event);
@@ -487,7 +519,16 @@ fn assemble(
             continue;
         }
         match b {
+            // one request per building, even if several spots are on (or next to) it
+            Some(b) if access.iter().any(|a: &Access| a.building_id == b.id) => {}
             Some(b) => {
+                if let Some(d) = b.dist_m {
+                    caveats.push(format!(
+                        "Roof spot #{} isn't on a CoStar building's address point; the nearest is {} ({d:.0} m away). Check it's the right building before you call",
+                        s.spot.rank,
+                        b.name.as_deref().unwrap_or(&b.id)
+                    ));
+                }
                 let contact = b
                     .contacts
                     .iter()
@@ -506,12 +547,18 @@ fn assemble(
                     ),
                 });
             }
-            None if have_kit => caveats.push(format!("Roof spot #{} isn't matched to a CoStar building, so there's no contact for it", s.spot.rank)),
+            None if costar == Costar::Here => caveats.push(format!("Roof spot #{} isn't matched to a CoStar building, so there's no contact for it", s.spot.rank)),
             None => {}
         }
     }
-    if !have_kit && spots.iter().any(|s| s.spot.standing == Standing::Roof) {
-        caveats.push("CoStar kit isn't loaded on this server, so roof spots have no access contacts yet".into());
+    if spots.iter().any(|s| s.spot.standing == Standing::Roof) {
+        match costar {
+            Costar::NoKit => caveats.push("CoStar kit isn't loaded on this server, so roof spots have no access contacts yet".into()),
+            Costar::NotHere => caveats.push(
+                "CoStar's building data covers Los Angeles and Houston, not this area, so there are no access contacts: ask the building's front desk or manager".into(),
+            ),
+            Costar::Here => {}
+        }
     }
     caveats.push(match source.provider.as_str() {
         "vexcel" => format!(

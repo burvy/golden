@@ -70,7 +70,9 @@ PhotoPills tells you where the sun is. golden tells you where to stand, and show
 
 ## Limits
 <!-- TODO by H20: be honest; judges trust this -->
-- Data only covers Los Angeles and Houston.
+- Vexcel aerial photos and height maps: Los Angeles, Houston and Princeton. Elsewhere in the US, heights come
+  from USGS LiDAR (older, coarser) and the map from Esri.
+- CoStar buildings and contacts: Los Angeles and Houston only, so "who to call" is empty elsewhere.
 - Height map date: LA flown 19–29 April 2026 (Vexcel collection `n34w118-us-ca-losangeles-2026`); newer buildings may be missing.
 - What's computed vs estimated: <!-- TODO -->
 
