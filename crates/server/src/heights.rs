@@ -55,6 +55,7 @@ async fn fetch(lat: f64, lon: f64, radius_m: f64) -> Result<DsmGrid, HeightsErro
         Ok(_) => "mostly empty".to_string(),
         Err(e) => e.to_string(),
     };
+    eprintln!("height map at {lat:.5},{lon:.5} r {radius_m:.0} m: Vexcel can't serve it ({why}), using USGS LiDAR");
     lidar::get_dsm(lat, lon, radius_m).await.map_err(|lidar| HeightsError::NoData { vexcel: why, lidar })
 }
 
