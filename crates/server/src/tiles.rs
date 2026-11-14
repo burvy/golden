@@ -1,7 +1,7 @@
 //! Map tiles for the web app, and the map prototype page.
 //!
 //! The phone never sees the Vexcel key: it asks us for `/api/tiles/vexcel/{z}/{x}/{y}` and we fetch,
-//! cache and pass the tile on. Where Vexcel has nothing for us (outside LA / Houston for our key)
+//! cache and pass the tile on. Where Vexcel has nothing for us (outside LA / Houston / Princeton for our key)
 //! we answer 204, and MapLibre shows the Esri imagery layer underneath.
 
 use std::sync::Arc;
