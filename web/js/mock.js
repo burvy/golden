@@ -85,7 +85,7 @@ export function createMock({ lat, lon, tz, date, text }) {
     return normalizeSearch({
       brief: { text, area: { lat, lon, radius_m: 400 }, date, tz, event: rise ? 'sunrise' : 'sunset', standing: 'any', framing: 'clear', max_spots: 10 },
       spots: res,
-      heat: { center_lat: lat, center_lon: lon, cell_m: 20, width: 1, height: 1, values: [0.5] },
+      heat: demoHeat(lat, lon, res),
       searched: 6, took_ms: 0,
     }, { demo: true });
   }
@@ -160,4 +160,20 @@ export function createMock({ lat, lon, tz, date, text }) {
   }
 
   return { search, agent, sun, hz, scene, buildings, photoDataUrl };
+}
+
+function demoHeat(lat, lon, spots) {
+  const width = 15, height = 15, cell_m = 75;
+  const values = [];
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const cy = lat - (y - (height - 1) / 2) * cell_m / 111320;
+    const cx = lon + (x - (width - 1) / 2) * cell_m / (111320 * Math.cos(lat * Math.PI / 180));
+    const intensity = spots.reduce((best, s) => {
+      const dx = (cx - s.lon) * 111320 * Math.cos(lat * Math.PI / 180);
+      const dy = (cy - s.lat) * 111320;
+      return Math.max(best, s.score * Math.exp(-(dx * dx + dy * dy) / (2 * 160 * 160)));
+    }, 0);
+    values.push(+intensity.toFixed(3));
+  }
+  return { center_lat: lat, center_lon: lon, cell_m, width, height, values };
 }

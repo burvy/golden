@@ -99,7 +99,7 @@ export function createClient(getBase) {
         timeout: 90000, as: 'json',
       })));
     } catch {
-      return normalizeHorizon(createMock(ctx).hz({ lat: ctx.lat, lon: ctx.lon }));
+      return { ...normalizeHorizon(createMock(ctx).hz({ lat: ctx.lat, lon: ctx.lon })), demo: true };
     }
   }
 

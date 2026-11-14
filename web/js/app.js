@@ -14,6 +14,7 @@ const state = {
   tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
   radius_m: 400,
   spots: [],
+  heat: null,
   path: [],
   sheet: '',
   demo: false,
@@ -156,6 +157,8 @@ async function search() {
   try {
     const r = await api.search(ctx);
     state.spots = r.spots;
+    state.heat = r.heat;
+    map.setHeat(r.heat);
     state.path = [];
     state.sheet = '';
     state.demo = r.demo;
@@ -225,6 +228,7 @@ async function select(sp) {
   api.sun(ctx).then((r) => {
     if (tok !== state.tok) return;
     state.d.sun = r.points;
+    state.d.sunDemo = !!r.demo;
     state.path = r.points;
     state.d.sunMeta = r.meta;
     state.d.sunDemo = !!r.demo;
@@ -234,6 +238,7 @@ async function select(sp) {
   api.horizon(ctx).then((r) => {
     if (tok !== state.tok) return;
     state.d.hz = r.points;
+    state.d.hzDemo = !!r.demo;
     state.d.hzMeta = r;
     paint();
   }).catch(() => { if (tok !== state.tok) return; state.d.hz = false; paint(); });
@@ -243,10 +248,10 @@ async function select(sp) {
 
 function cross() {
   const d = state.d;
-  if (d.hzMeta?.hidden_at) {
+  if (d.hzMeta?.hidden_at && Number.isFinite(Date.parse(d.hzMeta.hidden_at))) {
     return { ms: Date.parse(d.hzMeta.hidden_at), az: d.hzMeta.hidden_az_deg ?? 270, el: d.hzMeta.hidden_elev_deg ?? 0, fromServer: true };
   }
-  if (!d.sun || !d.hz || d.sun === false || d.hz === false) return null;
+  if (!d.sun?.length || !d.hz?.length) return null;
   return blockTime(d.sun, horizonFn(d.hz), state.rise);
 }
 
@@ -294,7 +299,7 @@ function renderCard() {
     const hf = d.hz ? horizonFn(d.hz) : () => 0;
     const tw = hf(c.az) > 1.5;
     const label = state.rise ? 'Sun clears the skyline' : tw ? 'Sun drops behind buildings' : 'Sun sets over open horizon';
-    head += `<p class="gold"><b>${label} at ${esc(formatClock(c.ms, state.tz))}</b></p>`;
+    head += `<p class="gold"><b>${label} at ${esc(formatClock(c.ms, state.tz))}</b>${sp.demo || d.hzDemo || d.sunDemo ? ' <em class="pill">DEMO ESTIMATE</em>' : ''}</p>`;
   }
   head += '</div>';
   const tabs = `<div class="row tabs" role="tablist">
@@ -303,7 +308,8 @@ function renderCard() {
   </div>`;
   let view;
   if (d.sun === false || d.hz === false) view = '<div class="msg err">Could not load sun path or horizon for this spot.</div>';
-  else if (!ready || !c) view = '<div class="msg">Loading simulated skyline…</div>';
+  else if (!ready) view = '<div class="msg">Loading skyline and sun path…</div>';
+  else if (!c) view = '<div class="msg">No valid sun/horizon crossing is available for this date.</div>';
   else view = state.tab === 'h' ? pano(c) : '<div id="v3" class="v3"></div>';
   let sl = '';
   if (ready && d.sun.length) {
@@ -313,7 +319,7 @@ function renderCard() {
       <input id="tm" type="range" min="${Date.parse(loP.t)}" max="${Date.parse(hiP.t)}" step="60000" value="${state.t}"></div>`;
   }
   const bl = renderBuildings(d.bld);
-  const simNote = `<p class="note">Skyline and 3D view are a height-grid simulation, not a photorealistic reconstruction.${d.sunDemo ? ' Sun path points are a labeled DEMO calculation because the server did not return a full path.' : ''}${d.scene?.demo ? ' Height grid is DEMO geometry.' : ''}</p>`;
+  const simNote = `<p class="note">Skyline and 3D view are a height-grid simulation, not a photorealistic reconstruction.${d.sunDemo || d.hzDemo ? ' Sun/horizon data are DEMO estimates because the server is unavailable.' : ''}${d.scene?.demo ? ' Height grid is DEMO geometry.' : ''}</p>`;
   $('#card').innerHTML = head + tabs + `<div class="view">${view}</div>` + sl + simNote + `<div class="cols">
     <div><h3>Aerial view</h3><img id="photo" alt="Aerial view toward the sun"><p class="note" id="pnote"></p></div>
     <div><h3>Property contacts</h3>${bl}</div>
@@ -328,7 +334,8 @@ function renderCard() {
     if (state.tab === 'h' && ready && c) document.querySelector('.view').innerHTML = pano(c);
     else renderAt(state.t);
   };
-  if (c) loadPhoto(c.az);
+  if (d.photo) { const im = $('#photo'); if (im) im.src = d.photo.url; $('#pnote').textContent = d.photo.note; }
+  else if (c && !d.photoLoading) { d.photoLoading = true; loadPhoto(c.az); }
   if (state.tab === '3' && ready && d.scene && d.scene !== false) {
     buildScene({ host: $('#v3'), sceneGrid: d.scene, sunPath: d.sun, horizon: d.hz, spot: sp, timeMs: state.t, yaw: c.az });
   } else if (state.tab === '3' && d.scene === false) {
@@ -352,12 +359,15 @@ async function loadPhoto(az) {
   const im = $('#photo');
   const note = $('#pnote');
   if (!im || !state.sel) return;
+  const selectedId = state.sel.id;
   try {
     const p = await api.photo({ lat: state.sel.lat, lon: state.sel.lon, az_deg: az, tz: state.tz, date: $('#date').value });
+    if (state.sel?.id !== selectedId) return;
+    state.d.photo = { url: p.url, note: (p.demo ? 'DEMO illustration. ' : '') + (p.attribution || '') + (p.captured ? ` · captured ${p.captured}` : '') };
     im.src = p.url;
-    note.textContent = (p.demo ? 'DEMO illustration. ' : '') + (p.attribution || '') + (p.captured ? ` · captured ${p.captured}` : '');
+    note.textContent = state.d.photo.note;
   } catch {
-    note.textContent = 'Aerial photo unavailable.';
+    if (state.sel?.id === selectedId) note.textContent = 'Aerial photo unavailable.';
   }
   setApiLabel();
 }

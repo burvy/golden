@@ -5,6 +5,7 @@ export function createMap({ host, getBase, onSelect, onMove }) {
   let map = null;
   let ready = false;
   let spots = [];
+  let heat = null;
   let selectedId = null;
   let sunAz = null;
   let fallback = null;
@@ -59,6 +60,11 @@ export function createMap({ host, getBase, onSelect, onMove }) {
     else fallback?.setView(lat, lon, zoom);
   }
 
+  function setHeat(next) {
+    heat = next || null;
+    render();
+  }
+
   function setSpots(next, selId, az) {
     spots = next || [];
     selectedId = selId;
@@ -68,6 +74,7 @@ export function createMap({ host, getBase, onSelect, onMove }) {
 
   function render() {
     if (fallback) {
+      fallback.setHeat(heat);
       fallback.setSpots(spots, selectedId, sunAz);
       return;
     }
@@ -80,6 +87,7 @@ export function createMap({ host, getBase, onSelect, onMove }) {
         properties: { id: s.id, score: s.score, demo: !!s.demo },
       })),
     };
+    map.getSource('golden-heat')?.setData(heatFeatures(heat));
     const src = map.getSource('spots');
     if (src) src.setData(fc);
     const sel = spots.find((s) => s.id === selectedId);
@@ -112,7 +120,7 @@ export function createMap({ host, getBase, onSelect, onMove }) {
     return fallback?.current() || { lat: 0, lon: 0, zoom: 14, radius_m: 400 };
   }
 
-  return { init, setView, setSpots, destroy, current, resize };
+  return { init, setView, setSpots, setHeat, destroy, current, resize };
 }
 
 function addLayers(map, getBase) {
@@ -145,6 +153,17 @@ function addLayers(map, getBase) {
       paint: { 'raster-opacity': 0.85 },
     });
   }
+  map.addSource('golden-heat', { type: 'geojson', data: emptyFc() });
+  map.addLayer({
+    id: 'golden-heat', type: 'heatmap', source: 'golden-heat',
+    paint: {
+      'heatmap-weight': ['get', 'weight'],
+      'heatmap-intensity': 1.3,
+      'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 11, 20, 16, 65],
+      'heatmap-opacity': 0.68,
+      'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.2, '#493451', 0.45, '#a35d48', 0.7, '#f7a54c', 1, '#ffe3a4'],
+    },
+  });
   map.addSource('spots', { type: 'geojson', data: emptyFc(), cluster: true, clusterRadius: 48, clusterMaxZoom: 16 });
   map.addSource('selected', { type: 'geojson', data: emptyFc() });
   map.addSource('sunline', { type: 'geojson', data: emptyFc() });
@@ -194,6 +213,26 @@ function addLayers(map, getBase) {
   });
 }
 
+/** Converts contract heat cells (row-major, meters) into geographic map points. */
+export function heatFeatures(heat) {
+  if (!heat || !Number.isInteger(heat.width) || !Number.isInteger(heat.height) ||
+      heat.width < 1 || heat.height < 1 || heat.width * heat.height > 250000 ||
+      !Array.isArray(heat.values) || !Number.isFinite(heat.center_lat) ||
+      !Number.isFinite(heat.center_lon) || !(heat.cell_m > 0)) return emptyFc();
+  const dlat = heat.cell_m / 111320;
+  const dlon = heat.cell_m / (111320 * Math.max(0.01, Math.cos(heat.center_lat * Math.PI / 180)));
+  const features = [];
+  for (let y = 0; y < heat.height; y++) for (let x = 0; x < heat.width; x++) {
+    const value = heat.values[y * heat.width + x];
+    if (!Number.isFinite(value) || value <= 0) continue;
+    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [
+      heat.center_lon + (x - (heat.width - 1) / 2) * dlon,
+      heat.center_lat - (y - (heat.height - 1) / 2) * dlat,
+    ] }, properties: { weight: Math.max(0, Math.min(1, value)) } });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
 function sunLine(sel, az) {
   if (!sel || az == null) return emptyFc();
   const rad = (az * Math.PI) / 180;
@@ -232,7 +271,7 @@ function canvasFallback(host, { onSelect, onMove }) {
   cv.setAttribute('aria-label', 'Map of ranked spots');
   host.innerHTML = '';
   host.appendChild(cv);
-  let lat = 0, lon = 0, spots = [], sel = null, az = null, z = 14;
+  let lat = 0, lon = 0, spots = [], heat = null, sel = null, az = null, z = 14;
   const draw = () => {
     const dpr = devicePixelRatio || 1;
     const W = host.clientWidth || 600, H = host.clientHeight || 360;
@@ -247,6 +286,13 @@ function canvasFallback(host, { onSelect, onMove }) {
     for (let i = 0; i < 8; i++) {
       cx.beginPath(); cx.moveTo((i / 8) * W, 0); cx.lineTo((i / 8) * W, H); cx.stroke();
       cx.beginPath(); cx.moveTo(0, (i / 8) * H); cx.lineTo(W, (i / 8) * H); cx.stroke();
+    }
+    for (const f of heatFeatures(heat).features) {
+      const [x, y] = px(f.geometry.coordinates[1], f.geometry.coordinates[0]);
+      const g = cx.createRadialGradient(x, y, 1, x, y, 32);
+      g.addColorStop(0, `rgba(255,177,90,${f.properties.weight * 0.5})`);
+      g.addColorStop(1, 'rgba(255,177,90,0)');
+      cx.fillStyle = g; cx.fillRect(x - 32, y - 32, 64, 64);
     }
     for (const s of spots) {
       const [x, y] = px(s.lat, s.lon);
@@ -285,6 +331,7 @@ function canvasFallback(host, { onSelect, onMove }) {
   return {
     setView(la, lo, zoom) { lat = la; lon = lo; z = zoom; onMove?.({ lat, lon, zoom: z, radius_m: 400 }); draw(); },
     setSpots(s, id, a) { spots = s; sel = id; az = a; draw(); },
+    setHeat(h) { heat = h; draw(); },
     current() { return { lat, lon, zoom: z, radius_m: 400 }; },
   };
 }
