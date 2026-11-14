@@ -8,7 +8,7 @@
 /// Half the width of the EPSG:3857 world, in 3857 units.
 pub const HALF_WORLD: f64 = 20_037_508.342_789_244;
 /// Earth radius used by EPSG:3857 (and by our ground-metre grid).
-pub const EARTH_R: f64 = 6_378_137.0;
+pub const EARTH_R: f64 = contracts::EARTH_R;
 /// Level 0 pixel size in 3857 units.
 pub const LEVEL0_SCALE: f64 = 2.0 * HALF_WORLD / (1u64 << 29) as f64;
 

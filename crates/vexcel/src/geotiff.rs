@@ -47,7 +47,7 @@ pub fn decode(bytes: &[u8]) -> Result<Raster, Error> {
         .find_tag(Tag::GdalNodata)?
         .and_then(|v| v.into_string().ok())
         .and_then(|s| s.trim_end_matches('\0').trim().parse().ok())
-        .unwrap_or(crate::grid::NODATA);
+        .unwrap_or(contracts::NODATA);
     let xmp = dec.find_tag(Tag::Unknown(700))?.and_then(|v| v.into_string().ok()).unwrap_or_default();
     let data = match dec.read_image()? {
         DecodingResult::F32(v) => v,

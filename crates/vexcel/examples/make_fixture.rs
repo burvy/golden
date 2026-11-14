@@ -37,7 +37,7 @@ fn main() -> Result<(), vexcel::Error> {
         },
         data: (0..h).flat_map(|r| (0..w).map(move |c| height(c, r))).collect(),
     };
-    grid.write_files(Path::new("fixtures"), "dsm_grid")?;
+    vexcel::grid::write_files(&grid, Path::new("fixtures"), "dsm_grid")?;
     println!("wrote fixtures/dsm_grid.json + dsm_grid.f32 ({} cells)", grid.data.len());
     Ok(())
 }

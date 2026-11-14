@@ -25,7 +25,7 @@ async fn main() -> Result<(), vexcel::Error> {
     println!("source {:?}", g.meta.source);
 
     let out = std::path::Path::new("cache").join("vexcel").join("out");
-    g.write_files(&out, "dsm")?;
+    vexcel::grid::write_files(&g, &out, "dsm")?;
     println!("wrote {}", out.join("dsm.json").display());
     Ok(())
 }

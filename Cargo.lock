@@ -78,6 +78,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1071,6 +1080,7 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 name = "vexcel"
 version = "0.1.0"
 dependencies = [
+ "contracts",
  "reqwest",
  "serde",
  "serde_json",

@@ -24,7 +24,7 @@ pub mod tiles;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub use grid::{DsmGrid, DsmMeta, DsmSource, NODATA};
+pub use contracts::{DsmGrid, DsmMeta, DsmSource, NODATA};
 
 use auth::ApiKey;
 use resample::GridSpec;
@@ -49,6 +49,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    DsmFile(#[from] contracts::DsmFileError),
     #[error("bad data: {0}")]
     BadData(String),
 }

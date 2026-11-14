@@ -5,7 +5,7 @@
 //! (a mean would shave building edges down).
 
 use crate::geotiff::Raster;
-use crate::grid::NODATA;
+use contracts::NODATA;
 use crate::tiles::{merc_to_lonlat, EARTH_R};
 
 /// Where the output grid sits. Same meaning as in `DsmMeta`.

@@ -3,6 +3,10 @@
 The source of truth for every shared data shape and endpoint. Each shape has a sample in `fixtures/`.
 Change a shape only in its own small PR, and update its fixture in the same PR (AGENTS.md rule 2).
 
+The Rust structs live in `crates/contracts` (pure: no network or files, so `core` can depend on it).
+IO crates fill them: e.g. `vexcel::get_dsm` returns a `contracts::DsmGrid`, and `vexcel::grid::{read_files, write_files}` do the disk part.
+A contract PR changes this file, the struct in `crates/contracts`, and the fixture together.
+
 ## Conventions
 - Angles in degrees. Azimuth clockwise from true north.
 - Heights in metres, as Vexcel's DSM gives them: roughly **above sea level** (downtown LA ground ≈ 80–90 m).
