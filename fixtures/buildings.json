@@ -1,0 +1,35 @@
+{
+  "buildings": [
+    {
+      "id": "costar:1234567",
+      "name": "Example Tower",
+      "address": "123 S Example St, Los Angeles, CA 90013",
+      "lat": 34.0493,
+      "lon": -118.2516,
+      "dist_m": 61.0,
+      "height_m": 45.7,
+      "floors": 12,
+      "roof_m": 131.5,
+      "property_type": "Office",
+      "contacts": [
+        { "role": "leasing", "name": "Jane Doe", "company": "Example Realty", "phone": "+1 213 555 0100", "email": "jane@example.com" },
+        { "role": "manager", "name": null, "company": "Example Property Management", "phone": "+1 213 555 0101", "email": null }
+      ],
+      "matterport": [ { "id": "AbCdEfGhIjK", "url": "https://my.matterport.com/show/?m=AbCdEfGhIjK" } ]
+    },
+    {
+      "id": "costar:7654321",
+      "name": null,
+      "address": "456 W Sample Ave, Los Angeles, CA 90013",
+      "lat": 34.0481,
+      "lon": -118.2503,
+      "dist_m": 118.0,
+      "height_m": null,
+      "floors": 4,
+      "roof_m": null,
+      "property_type": "Retail",
+      "contacts": [],
+      "matterport": []
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "brief": {
+    "text": "sun setting between two towers, from a rooftop, late June",
+    "area": { "lat": 34.0490, "lon": -118.2510, "radius_m": 400 },
+    "date": "2026-06-24",
+    "tz": "America/Los_Angeles",
+    "event": "sunset",
+    "standing": "roof",
+    "framing": "between",
+    "max_spots": 10
+  },
+  "spots": [
+    {
+      "id": "s-34.04912--118.25087-roof",
+      "rank": 1,
+      "score": 0.91,
+      "lat": 34.04912,
+      "lon": -118.25087,
+      "standing": "roof",
+      "ground_m": 131.5,
+      "eye_m": 133.2,
+      "sun": {
+        "date": "2026-06-24",
+        "flat_sunset": "2026-06-24T20:08:16-07:00",
+        "hidden_at": "2026-06-24T19:58:40-07:00",
+        "hidden_az_deg": 296.8,
+        "hidden_elev_deg": 2.1,
+        "golden_min_visible": 39
+      },
+      "why": [
+        "Sun drops into a 9 m gap between two towers at 19:58",
+        "39 min of golden hour in view",
+        "Roof 46 m up"
+      ],
+      "building_id": "costar:1234567"
+    },
+    {
+      "id": "s-34.04788--118.24931-roof",
+      "rank": 2,
+      "score": 0.74,
+      "lat": 34.04788,
+      "lon": -118.24931,
+      "standing": "roof",
+      "ground_m": 118.0,
+      "eye_m": 119.7,
+      "sun": {
+        "date": "2026-06-24",
+        "flat_sunset": "2026-06-24T20:08:16-07:00",
+        "hidden_at": "2026-06-24T19:41:10-07:00",
+        "hidden_az_deg": 294.2,
+        "hidden_elev_deg": 5.0,
+        "golden_min_visible": 22
+      },
+      "why": ["Sun sets into a wide gap between two towers at 19:41", "22 min of golden hour in view"],
+      "building_id": null
+    }
+  ],
+  "heat": {
+    "center_lat": 34.0490,
+    "center_lon": -118.2510,
+    "cell_m": 200,
+    "width": 4,
+    "height": 4,
+    "values": [0.05, 0.12, null, 0.0, 0.33, 0.91, 0.40, 0.08, 0.21, 0.74, 0.18, null, 0.0, 0.02, 0.06, 0.1]
+  },
+  "searched": 1600,
+  "took_ms": 2310
+}

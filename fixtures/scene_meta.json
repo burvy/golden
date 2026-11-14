@@ -1,0 +1,15 @@
+{
+  "id": "fixture",
+  "center_lat": 34.0490,
+  "center_lon": -118.2510,
+  "base_m": 70.0,
+  "encoding": "u16le_dm",
+  "nodata": 65535,
+  "rings": [
+    { "cell_m": 1.0, "width": 8, "height": 8, "byte_offset": 0 },
+    { "cell_m": 4.0, "width": 8, "height": 8, "byte_offset": 128 }
+  ],
+  "bytes": 256,
+  "data_url": "/api/scene/fixture.bin",
+  "attribution": "Height data © Vexcel Imaging US, Inc. (fixture: synthetic)"
+}

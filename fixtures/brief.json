@@ -1,0 +1,10 @@
+{
+  "text": "sun setting between two towers, from a rooftop, late June",
+  "area": { "lat": 34.0490, "lon": -118.2510, "radius_m": 400 },
+  "date": "2026-06-24",
+  "tz": "America/Los_Angeles",
+  "event": "sunset",
+  "standing": "roof",
+  "framing": "between",
+  "max_spots": 10
+}

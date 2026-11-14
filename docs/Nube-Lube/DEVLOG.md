@@ -51,3 +51,18 @@
 - Regenerated the fixture: byte-for-byte identical. Tests: 7 in contracts, 29 in vexcel, all pass. Cached fetch still works.
 - README: documented `VEXCEL_ENV_FILE` and `VEXCEL_CACHE_DIR`, filled in the height map date, added `crates/contracts` to the repo map.
 - New team rule (AGENTS.md on main): the agent no longer commits. It leaves changes uncommitted and suggests the commit.
+
+11/14/26, 11:42AM - Filled in every endpoint in `docs/contracts.md`: sun, horizon, search, scene, photo, buildings.
+- Each endpoint has its parameters (with defaults and limits), its response shape, a JSON example, and a fixture in `fixtures/`.
+- Every shape is also a Rust struct in `crates/contracts`. `cargo test -p contracts` checks every fixture parses into its struct,
+  so the doc, the fixtures and the code can't drift apart without a test failing.
+- Time zones (Ray's open question): every endpoint that returns times takes `tz` (default America/Los_Angeles) and returns local
+  times with the offset, e.g. 20:07:41-07:00. Ray's `/api/sun` on branch `server/sun` returns UTC only, so it needs updating.
+- Errors keep Ray's shape `{"error": "..."}`. Status codes: 400 bad input, 404 unknown id, 422 impossible (polar / no data),
+  502 Vexcel failed, 503 no key and not cached.
+- Phone budget built into the contract: JSON < ~200 KB; 3D heights come as a separate binary of u16 decimetres in 3 rings
+  (fine near, coarse far): ~400 KB on a phone instead of 16 MB; photos 1024 px by default, at most 2048.
+- "Spot" and "HorizonProfile" share one `sun` block (when the buildings hide the sun, and minutes of golden hour in view).
+- Still TODO: CallSheet (the agent's output).
+- Next: merge Ray's `server/sun` branch (it adds `crates/core` + `crates/server` and its own root Cargo.toml, so expect conflicts),
+  then make `/api/sun` match the contract.
