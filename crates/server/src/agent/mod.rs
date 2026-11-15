@@ -15,6 +15,7 @@ pub mod claude;
 pub mod library;
 pub mod read;
 pub mod times;
+pub mod tools;
 pub mod trial;
 
 use std::sync::Arc;
@@ -83,7 +84,7 @@ async fn run_with(st: &AppState, req: AgentRequest, now: DateTime<Utc>, llm: Opt
     lap("read", &mut split);
 
     // 2. search, re-planning if nothing fits
-    let (result, notes) = search_with_replan(st, brief, &place.name, &mut log).await?;
+    let (result, notes) = tools::search_step(st, brief, &place.name, llm.as_ref(), &mut log).await?;
     lap("search", &mut split);
     let brief = result.brief.clone();
     let date = api::parse_date(&brief.date)?;

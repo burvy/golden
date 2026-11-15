@@ -63,11 +63,20 @@ impl Trial {
         if kept.is_empty() {
             return Some(format!("its must drops all {} sampled points", self.points.len()));
         }
+        // A gate that drops some points separates them, even if the score is flat among the rest.
         let (lo, hi) = (kept[0].score, kept[kept.len() - 1].score);
-        if kept.len() >= 3 && hi - lo < MIN_SPREAD {
-            return Some(format!("every kept point scores about {hi:.2}, so it doesn't separate good points from bad"));
+        if self.dropped() == 0 && kept.len() >= 3 && hi - lo < MIN_SPREAD {
+            return Some(format!("every point scores about {hi:.2} and none is dropped, so it doesn't separate good points from bad"));
         }
         None
+    }
+
+    /// Worth telling the agent, but not a reason to refuse it.
+    fn caution(&self) -> Option<String> {
+        let kept = self.kept();
+        let spread = kept.last().map_or(0.0, |b| b.score) - kept.first().map_or(0.0, |w| w.score);
+        (self.dropped() > 0 && kept.len() >= 3 && spread < MIN_SPREAD)
+            .then(|| "only the must separates points: the kept ones all score the same, so they can't be ranked by it".into())
     }
 
     /// The summary the agent reads: the distribution, and the best, median and worst kept points.
@@ -95,6 +104,7 @@ impl Trial {
             "worst": kept.first().map(example),
             "a_dropped_point": dropped_example.map(|p| example(&p)),
             "verdict": self.degenerate().unwrap_or_else(|| "separates points: OK to use or save".into()),
+            "caution": self.caution(),
         })
     }
 }
@@ -245,6 +255,10 @@ mod tests {
         assert!(t.degenerate().unwrap().contains("doesn't separate"), "{:?}", t.degenerate());
         let t = trial(&g, &brief(300.0, "2026-06-21"), &checked(r#"{"name":"n","about":"n","must":{"num":0},"score":{"num":1}}"#)).unwrap();
         assert!(t.degenerate().unwrap().contains("drops all"));
+        // a gate that separates (drops the few roofs), with a flat score behind it: accepted, with a caution
+        let t = trial(&g, &brief(300.0, "2026-06-21"), &checked(r#"{"name":"g","about":"g","must":{"op":"not","x":{"f":"roof"}},"score":{"num":1}}"#)).unwrap();
+        assert_eq!(t.degenerate(), None);
+        assert!(t.summary()["caution"].as_str().unwrap().contains("only the must separates"));
         // the wall hides the June sun at different heights for different points: this one separates
         let t = trial(&g, &brief(300.0, "2026-06-21"), &checked(r#"{"name":"s","about":"s","score":{"op":"ramp","x":{"f":"sun_visible_min"},"lo":0,"hi":30}}"#)).unwrap();
         assert_eq!(t.degenerate(), None, "{}", t.summary());

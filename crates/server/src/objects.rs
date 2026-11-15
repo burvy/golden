@@ -52,15 +52,10 @@ pub fn check_kinds(kinds: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Objects of `kinds` in `area`. Vexcel answers come from the disk cache first; with no Vexcel key only cached
-/// areas have detections. A Vexcel failure is a note, not an error (CoStar still answers).
-pub async fn find_objects(st: &AppState, area: &Area, kinds: &[String]) -> Result<Found, ApiErr> {
-    find_objects_with(st, area, kinds, vexcel::auth::ApiKey::from_env().ok()).await
-}
-
-/// `find_objects` with the Vexcel key passed in (`None` = cache only; tests use it so a key in the
-/// environment can't make them call Vexcel).
-pub async fn find_objects_with(st: &AppState, area: &Area, kinds: &[String], key: Option<vexcel::auth::ApiKey>) -> Result<Found, ApiErr> {
+/// Objects of `kinds` in `area`. Vexcel answers come from the disk cache first; `key` None = cache only (tests
+/// pass None so a key in the environment can't make them call Vexcel). A Vexcel failure is a note, not an error
+/// (CoStar still answers).
+pub async fn find_objects(st: &AppState, area: &Area, kinds: &[String], key: Option<vexcel::auth::ApiKey>) -> Result<Found, ApiErr> {
     let kinds = check_kinds(kinds).map_err(ApiErr::bad)?;
     // the same grid search uses, so it's usually already in memory
     let grid = st.grids.around(area.lat, area.lon, skyline_need_m(area.radius_m)).await?;
@@ -339,7 +334,7 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, &trees).unwrap();
         }
-        let got = find_objects_with(&st, &a, &["building".into(), "Tree".into()], None).await.unwrap();
+        let got = find_objects(&st, &a, &["building".into(), "Tree".into()], None).await.unwrap();
         let b = got.objects.iter().find(|o| o.id == "costar:7").expect("the CoStar building");
         assert_eq!((b.base_m, b.top_m), (0.0, 45.7), "150 ft above the ground");
         let trees: Vec<&Object> = got.objects.iter().filter(|o| o.kind == "tree").collect();
