@@ -220,7 +220,13 @@ pub fn kinds_in(goals: &[Goal], library: &[CostFn]) -> Vec<String> {
     fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
         match v {
             serde_json::Value::Object(m) => {
-                if let Some(k) = m.get("kind").and_then(|k| k.as_str()) {
+                // an object by id names its kind too: "costar:7" is a building, "vexcel:<kind>:<lat>,<lon>" says it
+                let by_id = m.get("id").and_then(|i| i.as_str()).and_then(|i| match i.split(':').collect::<Vec<_>>()[..] {
+                    ["costar", _] => Some("building".to_string()),
+                    ["vexcel", k, _] => Some(k.replace('-', " ")),
+                    _ => None,
+                });
+                if let Some(k) = m.get("kind").and_then(|k| k.as_str()).map(str::to_string).or(by_id) {
                     if let Some(known) = OBJECT_KINDS.iter().find(|o| o.eq_ignore_ascii_case(k.trim())) {
                         if !out.iter().any(|o| o == known) {
                             out.push(known.to_string());
@@ -329,6 +335,8 @@ mod tests {
         let lib = golden_core::library::seeds();
         assert_eq!(kinds_in(&goals, &lib), ["tree", "building", "car", "swimming pool"], "fountain isn't a kind: left out");
         assert!(kinds_in(&[Goal::using("sun_clear")], &lib).is_empty(), "a sun-only brief needs no objects");
+        let by_id: Vec<Goal> = serde_json::from_str(r#"[{"use":"in_front","args":{"a":{"id":"vexcel:water-tower:34.05000,-118.25000"},"b":{"id":"costar:52227"}}}]"#).unwrap();
+        assert_eq!(kinds_in(&by_id, &lib), ["water tower", "building"]);
     }
 
     #[test]
