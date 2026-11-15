@@ -412,8 +412,11 @@ The lab now runs places in parallel (about 12 minutes for everything), and the t
 
 ## Promote list (for SEEDS)
 
-Ranked for the demo. "Works today" means it needs no objects. On main the server passes
-`objects: &[]`, so an entry with an object param can't bind until Ray's 053 (object sources) merges.
+Ranked for the demo. **Update (round 4): Ray's 053 (object sources) has merged**, so the server now
+passes objects to the search: CoStar buildings in LA, and Vexcel detections where it detects. Object
+entries can bind today wherever the area has a building object. In the lab, Princeton's buildings come
+from the height map. The server's come from Vexcel detection, so in Princeton an object entry works
+only where detection finds the building. "Sun only" entries need no objects at all.
 Every entry below has **100% recall@10 in every run**: 3 days (Nov 14, Jun 21, Dec 21), 18 places,
 and for the sunset entries both the tallest and the second tallest building. "Tested" counts the runs
 whose ungated search found spots (the others can't lose any). Prune is the median share of candidates
@@ -422,24 +425,23 @@ averaged over all its runs, with and without it.
 
 | rank | entry | brief it serves (lab scenarios) | works today? | tested runs (places) | prune median (min-max) | skyline traces | search time |
 |---|---|---|---|---|---|---|---|
-| 1 | `open_horizon` | "an open view, the sun right down to the horizon", sunset or sunrise (`open-view`, `sunrise-open-view`) | **yes, sun only** | 95 of 108 (18) | none today (its must reads the skyline); 97% (66-100%) with 065 at 1 deg | 55248 -> 3144 with 065 | 1186 -> ~117 ms with 065 |
-| 2 | `sun_wide_gap` | "the sun framed by the skyline, with room around it" (`wide-gap`, `sunrise-wide-gap`) | **yes, sun only** | 91 of 108 (18) | none today; 78% (38-97%) with 065 at 6 deg | 55248 -> 15341 with 065 | 1130 -> ~431 ms with 065 |
-| 3 | `sunset_behind` | "silhouette: the sun drops behind the tower" (`silhouette`, `silhouette-tower2`) | after 053 | 67 of 108 (17) | 68% (6-100%) | 55248 -> 21888 | 1210 -> 523 ms |
-| 4 | `sunset_beside` | "the sun sets beside the tower" (`sun-by-tower`, `sun-by-tower2`) | after 053 | 94 of 108 (18) | 68% (6-100%) | 55248 -> 21888 | 1219 -> 549 ms |
-| 5 | `sunset_between_two` | "the sun sets between two towers" (`between-towers`) | after 053 | 39 of 51 (14) | 76% (7-100%) | 26181 -> 8403 | 1229 -> 491 ms |
-| 6 | `tower_lit_at_sunset` | "golden light on the tower" (`lit-tower`, `lit-tower2`) | after 053 | 100 of 108 (18) | 41% (1-97%) | 55248 -> 29253 | 1192 -> 682 ms |
-| 7 | `sunrise_between_two` | "the sun rises between two towers" (`sunrise-between-towers`) | after 053 | 38 of 51 (15) | 63% (7-100%) | 26181 -> 10950 | 1102 -> 537 ms |
-| 8 | `tower_lit_at_sunrise` | "morning light on the tower" (`sunrise-lit-tower`) | after 053 | 42 of 54 (16) | 61% (6-99%) | 27624 -> 13305 | 1096 -> 585 ms |
-| 9 | `sunrise_beside` | "the sun rises beside the tower" (`sunrise-by-tower`) | after 053 | 50 of 54 (18) | 51% (6-96%) | 27624 -> 11772 | 1147 -> 527 ms |
-| 10 | `sunrise_behind` | "dawn silhouette behind the tower" (`sunrise-silhouette`) | after 053 | 33 of 54 (14) | 51% (6-96%) | 27624 -> 11772 | 1111 -> 514 ms |
-| 11 | `towers_over` | "low angle, looking up at the tower" (`looking-up`) | after 053 | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
+| 1 | `open_horizon` | "an open view, the sun right down to the horizon", sunset or sunrise (`open-view`, `sunrise-open-view`) | **yes**, sun only | 95 of 108 (18) | none today (its must reads the skyline); 97% (66-100%) with 065 at 1 deg | 55248 -> 3144 with 065 | 1186 -> ~117 ms with 065 |
+| 2 | `sun_wide_gap` | "the sun framed by the skyline, with room around it" (`wide-gap`, `sunrise-wide-gap`) | **yes**, sun only | 91 of 108 (18) | none today; 78% (38-97%) with 065 at 6 deg | 55248 -> 15341 with 065 | 1130 -> ~431 ms with 065 |
+| 3 | `sunset_behind` | "silhouette: the sun drops behind the tower" (`silhouette`, `silhouette-tower2`) | yes, needs a building object | 67 of 108 (17) | 68% (6-100%) | 55248 -> 21888 | 1210 -> 523 ms |
+| 4 | `sunset_beside` | "the sun sets beside the tower" (`sun-by-tower`, `sun-by-tower2`) | yes, needs a building object | 94 of 108 (18) | 68% (6-100%) | 55248 -> 21888 | 1219 -> 549 ms |
+| 5 | `sunset_between_two` | "the sun sets between two towers" (`between-towers`) | yes, needs a building object | 39 of 51 (14) | 76% (7-100%) | 26181 -> 8403 | 1229 -> 491 ms |
+| 6 | `tower_lit_at_sunset` | "golden light on the tower" (`lit-tower`, `lit-tower2`) | yes, needs a building object | 100 of 108 (18) | 41% (1-97%) | 55248 -> 29253 | 1192 -> 682 ms |
+| 7 | `sunrise_between_two` | "the sun rises between two towers" (`sunrise-between-towers`) | yes, needs a building object | 38 of 51 (15) | 63% (7-100%) | 26181 -> 10950 | 1102 -> 537 ms |
+| 8 | `tower_lit_at_sunrise` | "morning light on the tower" (`sunrise-lit-tower`) | yes, needs a building object | 42 of 54 (16) | 61% (6-99%) | 27624 -> 13305 | 1096 -> 585 ms |
+| 9 | `sunrise_beside` | "the sun rises beside the tower" (`sunrise-by-tower`) | yes, needs a building object | 50 of 54 (18) | 51% (6-96%) | 27624 -> 11772 | 1147 -> 527 ms |
+| 10 | `sunrise_behind` | "dawn silhouette behind the tower" (`sunrise-silhouette`) | yes, needs a building object | 33 of 54 (14) | 51% (6-96%) | 27624 -> 11772 | 1111 -> 514 ms |
+| 11 | `towers_over` | "low angle, looking up at the tower" (`looking-up`) | yes, needs a building object | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
 
 (Rows 1 and 2: tested runs and prune are the 065 ray what-if on those scenarios. The `open-view`
 scenario writes the same must inline.)
 
 How it's ranked:
-1. The two sun-only entries come first, because they're the only ones that change what the demo can
-   do today.
+1. The two sun-only entries come first, because they work in any area, objects or not.
 2. Then the sunset object shots, by how common the brief is. "Beside" and "behind" are the hero
    shots.
 3. Then the sunrise mirrors.
