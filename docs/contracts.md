@@ -341,9 +341,9 @@ What the filmmaker wants. `POST /api/search` body.
 
 ### Goal layers and stages
 Proposed for frontend v2 (task 057; core fills them in task 059). The page re-weights goals and switches
-musts on and off **in the browser**, from these numbers, without a second scoring engine: the formulas
-only ever run in core. Editing a formula, adding a goal or "check the new spots" is a new `POST /api/search`.
-Example: `fixtures/search_layers.json` (the mock's downtown, 4 goals, 1,264 candidates, 52 KB).
+musts on **in the browser**, from these numbers, without a second scoring engine: the formulas
+only ever run in core. Editing a formula, adding a goal, switching a must off or "check the new spots" is a new `POST /api/search`.
+Example: `fixtures/search_layers.json` (the mock's downtown, 4 goals, 1,264 candidates, 55 KB).
 
 There is one candidate per heat cell, so a layer is exact, not a summary.
 
@@ -365,21 +365,25 @@ There is one candidate per heat cell, so a layer is exact, not a summary.
 |---|---|
 | `layer.goal` | `Goal::name()`. |
 | `layer.weight`, `layer.must` | As searched (`weight` is `Goal::weight_or_default()`: 0 for a must with no weight). |
-| `layer.heat` | Same grid as `heat`. The goal's score 0–1 at each candidate, **raw** (not normalised), `null` exactly where `heat` is `null`. Core scores every goal at every candidate that has somewhere to stand, even ones a gate drops, so switching a must off is exact. |
+| `layer.heat` | Same grid as `heat`. The goal's score 0–1 at each candidate, **raw** (not normalised). `null` where `heat` is `null`, and where an earlier gate dropped the candidate so the score was never computed: core keeps the funnel's short-circuit, which saves skyline traces. Every goal has a score at every candidate that passed all the gates. |
 | `layer.gate` | Cells (indexes into `values`) the cost function's own `must` drops, whatever `layer.must` says. It's part of the formula, so the browser can't switch it off. Usually empty, then left out. |
 | `stage.label`, `n` | Plain words, and how many candidates are left after the stage. Fixed stages first (`goal: null`): points in the area circle, then somewhere to stand (= `searched`). Then one stage per goal that gates, cheapest first, in the order core ran them. |
 | `stage.goal` | The goal whose gate it is, or `null`. |
 
 **The browser rule** (core does the same; `rebuild` in `crates/contracts/tests/fixtures.rs` is the reference):
-1. A cell is dropped if it is in any layer's `gate`, or a layer with `must` scores ≤ 0 there.
+1. A cell is dropped if it is in any layer's `gate`, or a layer with `must` scores ≤ 0 or `null` there.
 2. Ranking goals: the layers with `weight` > 0. If there are none, every layer with weight 1/n.
 3. `raw` = Σ weight × score over the ranking goals, 0 if dropped. `heat` = raw / max raw (0 if max is 0).
 4. Spots: cells with raw > 0, best first (ties to the lower index), each at least `spacing_m` from those
    already picked (flat distance between cell centres), up to `max_spots`. Cell centres use the `DsmGrid` formula.
 
-With the searched weights this gives back `heat` and the order of `spots` (to 1e-3 and 1e-5°). After an edit,
-spots the server didn't send have no sun times or reasons yet: the page shows their per-goal scores from the
-layers and offers "check the new ones" (`POST /api/search`).
+With the searched weights this gives back `heat` and the order of `spots` (to 1e-3 and 1e-5°).
+
+What the browser can do alone: change weights (they only touch candidates that passed every gate, which have
+every score), remove a goal that doesn't gate, and switch a must **on** (it only masks more). Switching a must
+**off**, or removing a goal that gates, needs scores that were never computed: that is a new `POST /api/search`
+with the edited goals (~1–7 s). After an edit, spots the server didn't send have no sun times or reasons yet: the
+page shows their per-goal scores from the layers and offers "check the new ones" (`POST /api/search`).
 
 ### Goals and cost functions
 Part of `Brief` (`goals`). The design and the reasons are in `docs/metrics.md` (v2). Rust: `contracts::goal`.

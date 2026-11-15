@@ -288,8 +288,8 @@ fn object_refs() {
 
 /// The browser's rule (docs/contracts.md#goal-layers-and-stages): rebuild the combined heat and the
 /// picked spots from the goal layers alone. Core must give the same answer for the same weights.
-fn rebuild(layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>, Vec<usize>) {
-    let cells = layers[0].heat.values.len();
+fn rebuild(searched: &HeatGrid, layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>, Vec<usize>) {
+    let cells = searched.values.len();
     let dropped = |i: usize| layers.iter().any(|l| l.gate.contains(&(i as u32)) || (l.must && l.heat.values[i].unwrap_or(0.0) <= 0.0));
     let mut ranked: Vec<(&GoalLayer, f64)> = layers.iter().filter(|l| l.weight > 0.0).map(|l| (l, l.weight)).collect();
     if ranked.is_empty() {
@@ -297,7 +297,7 @@ fn rebuild(layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>,
     }
     let raw: Vec<Option<f64>> = (0..cells)
         .map(|i| {
-            layers[0].heat.values[i]?;
+            searched.values[i]?;
             Some(if dropped(i) { 0.0 } else { ranked.iter().map(|(l, w)| w * f64::from(l.heat.values[i].unwrap())).sum() })
         })
         .collect();
@@ -341,8 +341,8 @@ fn search_layers() {
     for (l, g) in r.layers.iter().zip(&r.brief.goals) {
         assert_eq!((l.weight, l.must), (g.weight_or_default(), g.must));
         assert_eq!((l.heat.width, l.heat.height, l.heat.cell_m), (r.heat.width, r.heat.height, r.heat.cell_m), "same grid as heat");
-        let nulls = |h: &HeatGrid| h.values.iter().map(Option::is_none).collect::<Vec<_>>();
-        assert_eq!(nulls(&l.heat), nulls(&r.heat), "a value at every searched candidate");
+        assert!(l.heat.values.iter().zip(&r.heat.values).all(|(a, b)| b.is_some() || a.is_none()), "null where nothing was searched");
+        assert!(r.heat.values.iter().zip(&l.heat.values).any(|(b, a)| b.is_some() && a.is_none()) || !r.stages.iter().any(|s| s.goal.is_some()), "null where an earlier gate stopped the funnel");
         assert!(l.heat.values.iter().flatten().all(|v| (0.0..=1.0).contains(v)));
     }
     assert!(r.stages.windows(2).all(|w| w[0].n >= w[1].n), "the funnel only narrows");
@@ -353,7 +353,12 @@ fn search_layers() {
     assert_eq!(notes, [Verdict::Confirmed, Verdict::Caution, Verdict::Confirmed, Verdict::Caution, Verdict::Confirmed]);
 
     // the browser's rebuild gives back the server's heat and spots
-    let (heat, picked) = rebuild(&r.layers, r.spacing_m.unwrap(), r.brief.max_spots as usize);
+    for s in &r.spots {
+        let at_spot = |&i: &usize| { let (a, b) = cell_latlon(&r.heat, i); (a - s.lat).abs() < 1e-5 && (b - s.lon).abs() < 1e-5 };
+        let i = (0..r.heat.values.len()).find(at_spot).expect("each spot is a cell centre");
+        assert!(r.layers.iter().all(|l| l.heat.values[i].is_some()), "every goal is scored at spot {}", s.rank);
+    }
+    let (heat, picked) = rebuild(&r.heat, &r.layers, r.spacing_m.unwrap(), r.brief.max_spots as usize);
     for (mine, theirs) in heat.iter().zip(&r.heat.values) {
         assert_eq!(mine.is_some(), theirs.is_some());
         if let (Some(a), Some(b)) = (mine, theirs) {
@@ -366,10 +371,10 @@ fn search_layers() {
         assert!((s.lat - lat).abs() < 1e-5 && (s.lon - lon).abs() < 1e-5, "spot {} is the cell the browser picks", s.rank);
     }
 
-    // turn the sun up and the roof preference off: the browser re-ranks without the server
+    // weight edits only (a must switched off needs a new search): turn the roof preference off
     let mut sun_only = r.layers.clone();
     sun_only[3].weight = 0.0;
-    let (_, picked2) = rebuild(&sun_only, r.spacing_m.unwrap(), 3);
+    let (_, picked2) = rebuild(&r.heat, &sun_only, r.spacing_m.unwrap(), 3);
     assert_eq!(picked2.len(), 3);
     assert_ne!(picked2, picked[..3], "re-weighting changes the top spots");
 }

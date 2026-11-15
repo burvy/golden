@@ -124,7 +124,9 @@ pub struct GoalLayer {
     /// The goal is a must: a candidate scoring 0 on it is dropped.
     pub must: bool,
     /// The goal's score, 0..1, at each candidate (one per cell, same grid as `SearchResult.heat`).
-    /// Raw, not normalised. `null` exactly where `SearchResult.heat` is `null`.
+    /// Raw, not normalised. `null` where `SearchResult.heat` is `null`, and where an earlier gate dropped
+    /// the candidate so this score was never computed (core keeps the funnel's short-circuit). Every goal
+    /// has a score at every candidate that passed all the gates.
     pub heat: HeatGrid,
     /// Cells (indexes into `heat.values`) that the cost function's own `must` drops, whatever the
     /// goal's `must` says. Part of the formula, so only a server search changes it. Usually empty.
