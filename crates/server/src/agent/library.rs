@@ -167,7 +167,8 @@ mod tests {
         let lib = Library::at(&testkit::temp_path("lib"));
         let names: Vec<String> = lib.entries().iter().map(|e| e.cost.name.clone()).collect();
         assert!(["sun_clear", "sun_between", "sun_behind"].iter().all(|n| names.contains(&n.to_string())), "{names:?}");
-        assert!(lib.entries().iter().all(|e| e.origin == Origin::Seed && e.tier == Tier::Skyline));
+        assert!(lib.entries().iter().all(|e| e.origin == Origin::Seed));
+        assert!(lib.entries().iter().filter(|e| e.cost.name.starts_with("sun_")).all(|e| e.tier == Tier::Skyline));
         let e = lib.save(&cost(r#"{"name":"sun_clear","about":"mine","score":{"num":1}}"#)).unwrap_err();
         assert!(e.contains("built-in"), "{e}");
     }

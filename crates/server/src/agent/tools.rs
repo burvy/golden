@@ -10,12 +10,14 @@
 //! - tool errors go back to Claude verbatim as `is_error` results, so it can fix them;
 //! - a refusal, a cut-off answer, an HTTP error, a loop that never searched or found nothing: the old fixed
 //!   search (`search_with_replan`) runs instead and the log says why.
+//!
 //! Every tool call is logged (stderr and the sheet's steps): name, how long, and a one-line result.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use contracts::{Brief, CostFn, Goal, Object, SearchResult, Spot, OBJECT_KINDS};
+use contracts::{Brief, CostFn, Goal, ObjRef, Object, SearchResult, Spot, OBJECT_KINDS};
 use golden_core::expr::check;
 use golden_core::features::FEATURES;
 use golden_core::search::skyline_need_m;
@@ -37,6 +39,11 @@ pub const MAX_INVESTIGATE: usize = 3;
 pub const TIME_BUDGET: Duration = Duration::from_secs(120);
 /// Photos sent to Claude in `investigate`: small, so three fit easily.
 const PHOTO_PX: u32 = 768;
+
+/// The planner runs only with `GOLDEN_PLANNER=1` (or `true`/`on`).
+pub fn planner_on() -> bool {
+    std::env::var("GOLDEN_PLANNER").is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on" | "yes"))
+}
 
 /// The search step: the tool loop when Claude is available, else (or if the loop fails) the fixed search.
 pub(super) async fn search_step(st: &AppState, brief: Brief, place: &str, llm: Option<&Claude>, log: &mut Log) -> Result<(SearchResult, Vec<String>), ApiErr> {
@@ -162,7 +169,7 @@ impl<'a> Session<'a> {
     pub async fn call(&mut self, name: &str, input: &Value) -> Result<ToolOut, String> {
         match name {
             "list_cost_functions" => Ok(self.list()),
-            "define_cost_function" => self.define(str_field(input, "cost_function")?).await,
+            "define_cost_function" => self.define(str_field(input, "cost_function")?, input["args"].as_str()).await,
             "save_cost_function" => self.save(str_field(input, "name")?),
             "find_objects" => self.find_objects(&str_list(input, "kinds")?).await,
             "search" => self.search(str_field(input, "goals")?).await,
@@ -186,7 +193,7 @@ impl<'a> Session<'a> {
         ToolOut::json(json!({"cost_functions": fns}), format!("{n} cost functions in the library"))
     }
 
-    async fn define(&mut self, text: &str) -> Result<ToolOut, String> {
+    async fn define(&mut self, text: &str, args: Option<&str>) -> Result<ToolOut, String> {
         if self.defines >= MAX_DEFINES {
             return Err(format!("define limit ({MAX_DEFINES}) reached: use a function that passed, or one from the library"));
         }
@@ -197,9 +204,17 @@ impl<'a> Session<'a> {
             return Err(format!("\"{}\" is already a {} library function: use it, or pick a new name", cost.name, e.origin.name()));
         }
         let checked = check(&cost).map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
+        let args: BTreeMap<String, ObjRef> = match args.map(str::trim).filter(|a| !a.is_empty()) {
+            Some(a) => serde_json::from_str(a).map_err(|e| format!("args must be a JSON object of object references, like {{\"a\": {{\"kind\": \"tree\"}}}}: {e}"))?,
+            None => BTreeMap::new(),
+        };
+        if !cost.params.is_empty() && args.is_empty() {
+            return Err(format!("\"{}\" has params {:?}: pass args to test it with, like {{\"{}\": {{\"kind\": \"building\"}}}}", cost.name, cost.params, cost.params[0]));
+        }
         let grid = self.grid().await?;
-        let (b, k) = (self.brief.clone(), checked.clone());
-        let t = api::blocking(move || trial(&grid, &b, &k)).await.map_err(|e| e.1)??;
+        let lib = self.library_now();
+        let (b, c, objects) = (self.brief.clone(), cost.clone(), self.objects.clone());
+        let t = api::blocking(move || trial(&grid, &b, &c, &args, &lib, &objects)).await.map_err(|e| e.1)??;
         let mut summary = t.summary();
         summary["name"] = json!(cost.name);
         summary["tier"] = json!(checked.tier().name());
@@ -260,11 +275,12 @@ impl<'a> Session<'a> {
         if goals.is_empty() || goals.len() > MAX_GOALS {
             return Err(format!("give 1 to {MAX_GOALS} goals"));
         }
-        let mut lib = self.library.all();
-        lib.extend(self.defined.iter().map(|(c, _)| c.clone()));
+        let lib = self.library_now();
         let names: Vec<String> = goals.iter().map(|g| g.name().to_string()).collect();
+        // the objects find_objects listed, else whatever the goals name
+        let objects = if self.objects.is_empty() { objects::for_goals(self.st, &self.brief.area, &goals, &lib).await } else { self.objects.clone() };
         let brief = Brief { goals, ..self.brief.clone() };
-        let r = api::run_search_with(self.st, brief, lib).await.map_err(|e| e.1)?;
+        let r = api::run_search_with(self.st, brief, lib, objects).await.map_err(|e| e.1)?;
         let spots: Vec<Value> = r.spots.iter().take(5).map(spot_summary).collect();
         let line = format!(
             "searched {} points for {}: {} spot(s){}",
@@ -334,6 +350,13 @@ impl<'a> Session<'a> {
         self.notes.push(format!("Agent's pick: {why}"));
         self.finished = true;
         Ok(ToolOut::json(json!({"ok": true}), format!("recommends {}: {why}", ids.join(", "))))
+    }
+
+    /// The library plus what was defined this brief (a defined function shadows nothing: names are unique).
+    fn library_now(&self) -> Vec<CostFn> {
+        let mut lib = self.library.all();
+        lib.extend(self.defined.iter().map(|(c, _)| c.clone()));
+        lib
     }
 
     async fn grid(&self) -> Result<std::sync::Arc<contracts::DsmGrid>, String> {
@@ -422,8 +445,14 @@ pub fn tool_defs() -> Value {
         tool("list_cost_functions", "The cost-function library: name, what it looks for, params, cost tier, seed or saved.", obj(json!({}), &[])),
         tool(
             "define_cost_function",
-            "Check a cost function and test-run it on ~50 points of the area. Returns errors (fix and retry), or the score distribution, the share its must drops, best/median/worst points with their feature values, and a verdict.",
-            obj(json!({"cost_function": {"type": "string", "description": "The cost function as JSON text: {\"name\", \"about\", \"must\"?, \"score\"}"}}), &["cost_function"]),
+            "Check a cost function and test-run it on every candidate in the area. Returns errors (fix and retry), or the score distribution, the share its must drops, best/median/worst points with the numbers behind their scores, and a verdict.",
+            obj(
+                json!({
+                    "cost_function": {"type": "string", "description": "The cost function as JSON text: {\"name\", \"about\", \"params\"?, \"must\"?, \"score\"}"},
+                    "args": {"type": "string", "description": "Only if it has params: JSON text giving each param an object, e.g. {\"a\": {\"kind\": \"tree\"}, \"b\": {\"kind\": \"building\"}}. Empty string otherwise."}
+                }),
+                &["cost_function", "args"],
+            ),
         ),
         tool(
             "save_cost_function",
@@ -508,7 +537,7 @@ mod tests {
     fn brief() -> Brief {
         Brief {
             text: "rooftop where the sun stays out all golden hour".into(),
-            area: Area { lat: testkit::LAT, lon: testkit::LON, radius_m: 300.0 },
+            area: Area { lat: testkit::LAT, lon: testkit::LON, radius_m: 300.0, name: None },
             date: "2026-06-21".into(),
             tz: "America/Los_Angeles".into(),
             event: Event::Sunset,
@@ -581,7 +610,7 @@ mod tests {
         let good: Value = serde_json::from_str(results(&seen[3])[0]["content"].as_str().unwrap()).unwrap();
         assert!(good["standable"].as_u64().unwrap() > 20 && good["verdict"].as_str().unwrap().starts_with("separates"), "{good}");
         // on the test city the wall either hides the sun early (dropped) or not at all: the gate does the separating
-        assert!(good["best"]["features"]["sun_visible_min"].as_f64().unwrap() > good["a_dropped_point"]["features"]["sun_visible_min"].as_f64().unwrap());
+        assert!(good["best"]["why"].as_str().is_some_and(|w| !w.is_empty()) && good["a_dropped_point"]["score"] == 0.0, "{good}");
         assert!(good["dropped_by_must"].as_u64().unwrap() > 0, "{good}");
 
         // saved, and the search used it: every spot is scored on both goals, ranked by the agent's pick
