@@ -1,6 +1,6 @@
 {
   "name": "sun_down_the_street",
-  "about": "Street level, the sun sets (or rises) down a street: into a 1.5-20 deg gap between buildings on both sides, and in view in it to within 2 deg of the horizon. Sun only, no objects needed. Its must (street level, not on a roof) drops points before any skyline is traced",
+  "about": "Street level, the sun sets (or rises) down a street: into a 1.5-20 deg gap between buildings on both sides, and in view in it to within 2 deg of the horizon. Sun only, no objects needed. Its must (street level, not on a roof) drops points before any skyline is traced. For briefs like 'the sun setting (or rising) right down a street, buildings on both sides (lab: down-the-street)'",
   "must": {
     "op": "not",
     "x": {

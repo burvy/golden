@@ -2,7 +2,7 @@
 
 ## Headline numbers
 
-- **15 cost functions measured and kept**, 11 of them in the search today (the other 4 are next).
+- **15 cost functions measured and kept**, all 15 in the search today.
 - **Recall kept: 100%.** Every one keeps all of the search's top 10 spots in every test: 18 places in
   downtown LA and Princeton, 3 days (Nov 14, Jun 21, Dec 21), up to 100 runs with spots per entry.
 - **They skip half the work or more.** 12 of them have a cheap check that drops a median 41-93% of
@@ -516,7 +516,8 @@ Two sun-only street shots. They need no objects, so they work in any area today.
 "seed since 070" below). New candidates since: `skyline_glow` and `skyline_glow_at_sunrise` (round 5), `sun_down_the_street` and
 `sun_keyhole` (round 7).
 
-All 11 are in core's SEEDS since task 070 (each `about` names its brief). The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
+All 15 are in core's SEEDS: the first 11 since task 070, and `sun_down_the_street`, `sun_keyhole`,
+`skyline_glow` and `skyline_glow_at_sunrise` since task 068 (each `about` names its brief). The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
 
 Ranked for the demo. **Update (round 4): Ray's 053 (object sources) has merged**, so the server now
 passes objects to the search: CoStar buildings in LA, and Vexcel detections where it detects. Object

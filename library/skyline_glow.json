@@ -1,6 +1,6 @@
 {
   "name": "skyline_glow",
-  "about": "The setting sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 345-165 deg) drops points before any skyline is traced, so use it as a must",
+  "about": "The setting sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 345-165 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'the skyline glows: low sun on both towers (lab: skyline-glow)'",
   "params": [
     "a",
     "b"

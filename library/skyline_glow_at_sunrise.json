@@ -1,6 +1,6 @@
 {
   "name": "skyline_glow_at_sunrise",
-  "about": "The rising sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 195-15 deg) drops points before any skyline is traced, so use it as a must",
+  "about": "The rising sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 195-15 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'morning glow on both towers (lab: sunrise-skyline-glow)'",
   "params": [
     "a",
     "b"
