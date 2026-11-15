@@ -41,7 +41,7 @@ pub const MAX_RADIUS_M: f64 = 3000.0;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("no Vexcel key: set VEXCEL_API_KEY, or VEXCEL_ENV_FILE to a .env file containing it")]
+    #[error("no Vexcel key: set VEXCEL_API_KEY, or VEXCEL_ENV_FILE to a file holding either the bare key on one line or VEXCEL_API_KEY=...")]
     NoKey,
     #[error("radius {0} m is over the {MAX_RADIUS_M} m limit")]
     TooLarge(f64),
