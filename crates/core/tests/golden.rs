@@ -35,6 +35,8 @@ fn brief(lat: f64, lon: f64, radius_m: f64, date: &str, event: Event, standing: 
         standing,
         framing,
         max_spots: 10,
+        goals: Vec::new(),
+        lens_deg: contracts::DEFAULT_LENS_DEG,
     }
 }
 
