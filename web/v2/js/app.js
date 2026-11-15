@@ -81,7 +81,7 @@ async function send(text, go = false, instant = false) {
       applyResult(r.result, { fit: true });
       if (matchMedia('(max-width:980px)').matches && !instant) $('#funnel').scrollIntoView({ behavior: 'smooth', block: 'start' });
       const musts = S.goals.filter(g => g.must).length, n = S.goals.length;
-      const said = `I set ${n} goal${n === 1 ? '' : 's'}${musts ? `: ${musts} that every spot must meet, the rest to rank by` : ''}. Change them on the right and the map updates at once; drag the map and press “Search this area” if the place isn’t quite right.`;
+      const said = `I set ${n} goal${n === 1 ? '' : 's'}${musts ? `: ${musts} that every spot must meet, the rest to rank by` : ''}. Change them ${matchMedia('(max-width:980px)').matches ? 'below the map' : 'on the left'} and the map updates at once; drag the map and press “Search this area” if the place isn’t quite right.`;
       bubble('agent', esc(r.note ? `${r.note} ${said}` : said));
       S.messages.push({ role: 'agent', text: said });
     }

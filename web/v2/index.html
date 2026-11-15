@@ -32,11 +32,11 @@ header .brief{margin-left:auto;font-size:14px;color:#fff;display:flex;gap:6px;fl
 header .brief span{background:rgba(255,255,255,.14);border-radius:99px;padding:2px 10px}
 
 /* desktop: chat | stage | goals, each column scrolls on its own */
-main{display:grid;grid-template-columns:minmax(300px,340px) minmax(0,1fr) minmax(320px,370px);height:calc(100vh - var(--hdr));height:calc(100dvh - var(--hdr))}
+main{display:grid;grid-template-columns:minmax(320px,370px) minmax(0,1fr) minmax(300px,340px);height:calc(100vh - var(--hdr));height:calc(100dvh - var(--hdr))}
 main>section,main>aside{min-height:0;overflow:auto}
 
 /* ---------- chat ---------- */
-#chat{display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line)}
+#chat{display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line)}
 #chat h2{font-size:19px;padding:16px 18px 4px}
 #chat .lede{margin:0 18px 8px;color:var(--mute);font-size:14px}
 #log{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:8px 16px 12px}
@@ -151,7 +151,7 @@ main>section,main>aside{min-height:0;overflow:auto}
 .calls a{color:var(--sky-deep);font-weight:600;white-space:nowrap}
 
 /* ---------- goals ---------- */
-#goals{background:var(--panel);border-left:1px solid var(--line);padding:16px 16px 28px;position:relative}
+#goals{background:var(--panel);border-right:1px solid var(--line);padding:16px 16px 28px;position:relative}
 #goals h2{font-size:19px}
 #goals .lede{margin:2px 0 14px;color:var(--mute);font-size:14px}
 .group{margin:0 0 16px}
@@ -200,10 +200,10 @@ button[disabled]{opacity:.55;cursor:default}
  header .brief{margin-left:0;justify-content:flex-start;width:100%}
  main{display:flex;flex-direction:column;height:auto}
  main>section,main>aside{overflow:visible}
- #chat{border-right:0;border-bottom:1px solid var(--line)}
+ #chat{border-left:0;border-bottom:1px solid var(--line);order:-1} /* desktop: numbers left, chat right; phone keeps chat first */
  #log{max-height:46vh;max-height:46svh}
  #stage{padding:14px 12px 8px}
- #goals{border-left:0;border-top:1px solid var(--line);padding:16px 12px 28px}
+ #goals{border-right:0;border-top:1px solid var(--line);padding:16px 12px 28px;order:1}
  .fs .num{font-size:21px}.fs{padding:0 6px}.fcap div{padding:0 6px;font-size:12px}
  #map{height:62vh;height:62svh}
  #layers{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;max-width:calc(100% - 70px)}#layers button{flex:none}
@@ -221,14 +221,12 @@ button[disabled]{opacity:.55;cursor:default}
   <div class="brief" id="hbrief" aria-label="The brief so far"></div>
 </header>
 <main>
-  <section id="chat" aria-label="Brief">
-    <div class="top"><h2>Tell me the shot</h2><button type="button" id="newbrief">New brief</button></div>
-    <div id="log" aria-live="polite"></div>
-    <div id="known"></div>
-    <div id="choices"></div>
-    <button id="gonow" type="button" hidden>Search now with my picks</button>
-    <form id="say"><label class="sr" for="msg">Message</label><textarea id="msg" rows="1" placeholder="Describe the shot"></textarea><button>Send</button></form>
-  </section>
+  <aside id="goals" aria-label="Goals">
+    <h2>What I’m filtering for</h2>
+    <p class="lede">I turned the brief into these goals. Change a weight or a must and the map and spots update straight away.</p>
+    <div id="glists"></div>
+    <button id="addgoal" type="button" hidden>Add a goal: tell me in the chat</button>
+  </aside>
 
   <section id="stage" aria-label="Results">
     <div id="funnel" aria-label="How the points were cut down"></div>
@@ -246,12 +244,14 @@ button[disabled]{opacity:.55;cursor:default}
     <article id="spot" hidden aria-label="Selected spot"></article>
   </section>
 
-  <aside id="goals" aria-label="Goals">
-    <h2>What I’m filtering for</h2>
-    <p class="lede">I turned the brief into these goals. Change a weight or a must and the map and spots update straight away.</p>
-    <div id="glists"></div>
-    <button id="addgoal" type="button" hidden>Add a goal: tell me in the chat</button>
-  </aside>
+  <section id="chat" aria-label="Brief">
+    <div class="top"><h2>Tell me the shot</h2><button type="button" id="newbrief">New brief</button></div>
+    <div id="log" aria-live="polite"></div>
+    <div id="known"></div>
+    <div id="choices"></div>
+    <button id="gonow" type="button" hidden>Search now with my picks</button>
+    <form id="say"><label class="sr" for="msg">Message</label><textarea id="msg" rows="1" placeholder="Describe the shot"></textarea><button>Send</button></form>
+  </section>
 </main>
 <script type="module" src="js/app.js"></script>
 </body></html>
