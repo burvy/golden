@@ -226,15 +226,17 @@ const KIND_WORDS: [(&str, &str); 24] = [
     ("rooftop hvac", "rooftop HVAC unit"), ("cooling unit", "rooftop HVAC unit"),
 ];
 
-/// Pure: the `OBJECT_KINDS` kind a user's object word names ("Towers" -> "building", "water tower" -> itself),
-/// or None if it names none ("fountain", "statue").
+/// Pure: the `OBJECT_KINDS` kind a user's object words name ("Towers" -> "building", "water tower" -> itself),
+/// or None if they name none ("fountain", "statue"). Tries the whole phrase, then drops leading words down to the
+/// last one ("tall glass tower" -> "glass tower" -> "tower"), so "big water tower" stays a water tower.
 fn object_kind(word: &str) -> Option<&'static str> {
-    let w = word.trim().to_lowercase();
-    let w = w.split_whitespace().collect::<Vec<_>>().join(" ");
-    let find = |w: &str| {
+    let w = word.to_lowercase();
+    let words: Vec<&str> = w.split_whitespace().collect();
+    let exact = |w: &str| {
         OBJECT_KINDS.iter().find(|k| k.to_lowercase() == w).copied().or_else(|| KIND_WORDS.iter().find(|(x, _)| *x == w).map(|(_, k)| *k))
     };
-    find(&w).or_else(|| w.strip_suffix('s').and_then(find)).or_else(|| w.strip_suffix("es").and_then(find))
+    let find = |w: &str| exact(w).or_else(|| w.strip_suffix('s').and_then(exact)).or_else(|| w.strip_suffix("es").and_then(exact));
+    (0..words.len()).find_map(|i| find(&words[i..].join(" ")))
 }
 
 /// Pure: can the search score this goal in `area` (a known cost function, the right args, a valid expression,
@@ -465,9 +467,8 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
          date = YYYY-MM-DD if a day is implied (\"late June\" = the 24th of the next June), else \"\"; event, standing, framing \
          (your best guess); known = the fields the filmmaker actually said or clearly implied (NOT your guesses); \
          objects = things they want in the shot placed relative to each other (\"a fountain in front of a tower\" = \
-         {{relation: in_front, a: fountain, b: building}}; lined_up = one stacked on the other; beside = side by side), each \
-         object one of {OBJECT_KINDS:?} when it is one (a tower or skyscraper is a building, a palm is a tree), else one \
-         short noun in their words; never the sun (that's framing), [] if none.\n\
+         {{relation: in_front, a: fountain, b: tower}}; lined_up = one stacked on the other; beside = side by side), each \
+         object one short noun in their words, never the sun (that's framing), [] if none.\n\
          Then either ask ONE short, friendly question (under 15 words) about the most important unknown, or set ready = true.\n\
          Rules: never ask about something already answered. You have asked {asked} of at most {MAX_ASKS} questions. \
          Ask only what changes where they should stand: the place first if unknown, then how the sun sits in the frame, then roof or street. \
@@ -692,6 +693,14 @@ mod tests {
         assert_eq!(object_kind("Trees"), Some("tree"));
         assert_eq!(object_kind("water tower"), Some("water tower"), "not a building");
         assert_eq!(object_kind("pools"), Some("swimming pool"));
+        // whole phrase first, then the last words
+        assert_eq!(object_kind("glass tower"), Some("building"));
+        assert_eq!(object_kind("tall skyscraper"), Some("building"));
+        assert_eq!(object_kind("office building"), Some("building"));
+        assert_eq!(object_kind("Old Oak Trees"), Some("tree"));
+        assert_eq!(object_kind("big water tower"), Some("water tower"));
+        assert_eq!(object_kind("stone fountain"), None);
+        assert_eq!(object_kind(""), None);
         assert_eq!(object_kind("buses"), None);
         for k in OBJECT_KINDS {
             assert_eq!(object_kind(k), Some(*k));
@@ -711,7 +720,7 @@ mod tests {
         let rels = read_rels("fountain in front of a tower");
         let g = goals_for(&b, &rels);
         let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
-            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
+            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(), name: None,
         };
         // a source only knows OBJECT_KINDS: the tower binds as a building, the fountain never does
         let objects = [obj("t:1", "tree", 0.0005), obj("t:2", "building", 0.001)];
@@ -737,7 +746,7 @@ mod tests {
         assert!(why[0].msg.starts_with("no object of kind \"fountain\""), "{why:?}");
         // once a fountain and a tower are known, it runs
         let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
-            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
+            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(), name: None,
         };
         let objects = [obj("t:1", "fountain", 0.0005), obj("t:2", "building", 0.001)];
         assert!(checkable(&g[1], &golden_core::search::Inputs { library: &lib, objects: &objects }, &b.area));
