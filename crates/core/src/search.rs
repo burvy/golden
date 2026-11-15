@@ -27,7 +27,7 @@
 //! The sun moves less than 0.01° across an 800 m area, so one track serves every candidate.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use contracts::{Area, Brief, CostFn, DsmGrid, Event, HeatGrid, HorizonPoint, Object, Rated, Spot, Standing, EARTH_R};
+use contracts::{Area, Brief, CostFn, DsmGrid, Event, Goal, HeatGrid, HorizonPoint, Object, Rated, Spot, Standing, EARTH_R};
 use contracts::search::MAX_HEAT_SIDE;
 
 use crate::expr::{score_of, ExprError, Node};
@@ -128,6 +128,19 @@ pub struct Inputs<'a> {
 /// is the offset of the local day (e.g. -25200 for PDT), used for the times in the results.
 pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
     search_with(grid, brief, &Inputs { library: &library::seeds(), objects: &[] }, utc_offset_s)
+}
+
+/// Can `goal` run in `area` with `inputs`: a known cost function with the right args and a valid
+/// expression, and every object it names found among `inputs.objects`? The same checks
+/// `search_with` makes before it searches, so a caller can drop (or flag) a goal up front instead
+/// of failing the whole search. Errors are prefixed `goals[0]`.
+pub fn runnable(goal: &Goal, inputs: &Inputs, area: &Area) -> Result<(), Vec<ExprError>> {
+    let ready = library::ready(std::slice::from_ref(goal), inputs.library)?;
+    match bind_goals(&ready, inputs.objects, area) {
+        Ok(_) => Ok(()),
+        Err(SearchError::BadGoals(errs)) => Err(errs),
+        Err(other) => Err(vec![ExprError { at: "goals[0]".into(), msg: other.to_string() }]),
+    }
 }
 
 /// `search`, with the cost functions and objects the brief's goals can name.
@@ -1183,6 +1196,24 @@ mod tests {
         }
         let b = Brief { lens_deg: 0.0, ..brief(100.0, Standing::Any, Framing::Clear) };
         assert_eq!(search(&g, &b, PDT), Err(SearchError::BadLens(0.0)));
+    }
+
+    #[test]
+    fn runnable_checks_the_library_and_the_objects() {
+        let (_, objs) = plaza(false);
+        let lib = crate::library::seeds();
+        let area = Area { lat: LAT, lon: LON, radius_m: 300.0 };
+        let goal = |s: &str| -> Goal { serde_json::from_str(s).unwrap() };
+        let none: [Object; 0] = [];
+        let with = |objects| Inputs { library: &lib, objects };
+        let front = goal(r#"{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"kind":"building"}}}"#);
+        assert_eq!(runnable(&goal(r#"{"use":"sun_clear"}"#), &with(&none[..]), &area), Ok(()));
+        assert_eq!(runnable(&front, &with(&objs[..]), &area), Ok(()));
+        // a seed, but no fountain known here: not runnable, and the reason says so
+        let errs = runnable(&front, &with(&none[..]), &area).unwrap_err();
+        assert!(errs[0].to_string().starts_with("goals[0]: no object of kind \"fountain\""), "{errs:?}");
+        let errs = runnable(&goal(r#"{"use":"golden_retriever"}"#), &with(&objs[..]), &area).unwrap_err();
+        assert!(errs[0].to_string().starts_with("goals[0].use: no cost function"), "{errs:?}");
     }
 
     #[test]

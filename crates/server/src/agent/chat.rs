@@ -139,9 +139,11 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
 
     let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
     brief.goals = goals_for(&brief, &turn.rels);
-    // What the search can score today: the seed library's goals (sun_* since 051; objects come with 052).
+    // What the search can score here: seed goals whose objects are known. The server has no object source yet
+    // (task 053), so object goals stay "not checked yet" until it does, then switch on by themselves.
     let lib = golden_core::library::seeds();
-    let unchecked: Vec<Rel> = turn.rels.iter().zip(&brief.goals[1..]).filter(|(_, g)| !checkable(g, &lib)).map(|(r, _)| r.clone()).collect();
+    let inputs = golden_core::search::Inputs { library: &lib, objects: &[] };
+    let unchecked: Vec<Rel> = turn.rels.iter().zip(&brief.goals[1..]).filter(|(_, g)| !checkable(g, &inputs, &brief.area)).map(|(r, _)| r.clone()).collect();
     let mut known = turn.known;
     if req.area.is_some() {
         known.push(Topic::Place);
@@ -164,12 +166,12 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     log.add("chat", format!("Understood after {qs}: {} (by {by})", words.join(", ")));
     let note = cant_check_note(&unchecked, brief.event);
     if let Some(n) = &note {
-        log.add("goals", format!("{n} Spots are ranked on the sun only; objects arrive with the next core update."));
+        log.add("goals", format!("{n} Spots are ranked on the sun only; no objects are known here yet."));
     }
     // The search gets only the goals it can score (an unknown name is an error since 051). The sheet writer
     // reads brief.text: tell it what the search ignored, then put the user's words back.
     let mut for_sheet = brief.clone();
-    for_sheet.goals.retain(|g| checkable(g, &lib));
+    for_sheet.goals.retain(|g| checkable(g, &inputs, &brief.area));
     for_sheet.text = text_for_sheet(&brief.text, &unchecked);
     let place_name = place.name.clone();
     let mut sheet = sheet_for(st, for_sheet, place, llm.as_ref(), log).await?;
@@ -211,9 +213,10 @@ fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
     std::iter::once(Goal::using(sun)).chain(objects).collect()
 }
 
-/// Pure: can the search score this goal with `library` (a known name, the right args, a valid expression)?
-fn checkable(g: &Goal, library: &[contracts::CostFn]) -> bool {
-    golden_core::library::ready(std::slice::from_ref(g), library).is_ok()
+/// Pure: can the search score this goal in `area` (a known cost function, the right args, a valid expression,
+/// and its objects among `inputs.objects`)?
+fn checkable(g: &Goal, inputs: &golden_core::search::Inputs, area: &contracts::Area) -> bool {
+    golden_core::search::runnable(g, inputs, area).is_ok()
 }
 
 /// Pure: the kinds named in the object goals, each once, in order.
@@ -661,8 +664,19 @@ mod tests {
         let lib = golden_core::library::seeds();
         let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
         let g = goals_for(&b, &read_rels("fountain in front of a tower"));
-        assert!(checkable(&g[0], &lib), "sun_between is a seed (051)");
-        assert!(!checkable(&g[1], &lib), "in_front isn't, until 052");
+        let none = golden_core::search::Inputs { library: &lib, objects: &[] };
+        assert!(checkable(&g[0], &none, &b.area), "sun_between is a seed (051)");
+        // in_front is a seed too (052), but there's no fountain known here
+        assert!(golden_core::library::ready(&g[1..], &lib).is_ok());
+        assert!(!checkable(&g[1], &none, &b.area));
+        let why = golden_core::search::runnable(&g[1], &none, &b.area).unwrap_err();
+        assert!(why[0].msg.starts_with("no object of kind \"fountain\""), "{why:?}");
+        // once a fountain and a tower are known, it runs
+        let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
+            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
+        };
+        let objects = [obj("t:1", "fountain", 0.0005), obj("t:2", "tower", 0.001)];
+        assert!(checkable(&g[1], &golden_core::search::Inputs { library: &lib, objects: &objects }, &b.area));
     }
 
     fn rel(relation: Relation, a: &str, b: &str) -> Rel {
@@ -837,7 +851,7 @@ mod tests {
         assert_eq!(sheet.brief.goals, [Goal::using("sun_clear")], "the search only got the goal it can score");
         assert!(sheet.spots[0].spot.scores.iter().all(|r| r.goal == "sun_clear"));
         assert_eq!(sheet.caveats[0], r.note.unwrap());
-        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("next core update")), "{:?}", sheet.steps);
+        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("no objects are known here")), "{:?}", sheet.steps);
     }
 
     #[tokio::test]
