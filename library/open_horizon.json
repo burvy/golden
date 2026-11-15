@@ -1,0 +1,6 @@
+{
+  "name": "open_horizon",
+  "about": "An open horizon: the sun stays in view to within 1 deg of the horizon (its must), ranked on clear sky. Sun only, no objects needed. Works for sunset and sunrise",
+  "must": { "op": "lt", "x": { "f": "sun_hidden_elev" }, "than": { "num": 1 } },
+  "score": { "f": "sun_clear" }
+}
