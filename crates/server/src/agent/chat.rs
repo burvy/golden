@@ -18,6 +18,8 @@ pub const MAX_ASKS: usize = 3;
 /// Request limits, so a client can't run up a huge prompt.
 const MAX_MESSAGES: usize = 24;
 const MAX_TEXT: usize = 1000;
+/// Places whose height maps and photos are already cached (the demo areas): offered first, so a choice is quick.
+const READY_PLACES: [&str; 2] = ["Downtown LA", "Princeton"];
 
 pub async fn post_chat(State(st): State<Arc<AppState>>, body: Result<Json<ChatRequest>, JsonRejection>) -> Result<Response, ApiErr> {
     let Json(req) = body.map_err(|e| ApiErr::bad(e.body_text()))?;
@@ -228,12 +230,13 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
          Rules: never ask about something already answered. You have asked {asked} of at most {MAX_ASKS} questions. \
          Ask only what changes where they should stand: the place first if unknown, then how the sun sits in the frame, then roof or street. \
          Don't ask about the date (tomorrow is the default) or sunset vs sunrise unless it's unclear and matters. \
-         Give 2-4 short choices; the first is the default you'd pick. If the filmmaker leaves it to you or says to search, ready = true. \
+         Give 2-4 short choices; the first is the default you'd pick (for the place, offer {} first: their data is ready). If the filmmaker leaves it to you or says to search, ready = true. \
          When ready, question = \"\" and choices = [].",
         today.format("%A %Y-%m-%d"),
         req.tz,
         places,
         transcript(&req.messages),
+        READY_PLACES.join(" and "),
     )
 }
 
@@ -408,6 +411,7 @@ mod tests {
         assert!(p.contains("You have asked 1 of at most 3 questions"));
         assert!(p.contains("Saturday 2026-11-14"));
         assert!(!p.contains("picked the area"));
+        assert!(p.contains("offer Downtown LA and Princeton first"));
     }
 
     // ---- whole turns: synthetic grid, no network ----
