@@ -1,0 +1,12 @@
+{
+  "name": "sun_wide_gap",
+  "about": "The sun sets into a wide opening (6-20 deg, best 9-14) between tall sides and stays in view in it to within 2 deg of the horizon: the skyline frames the sun with room around it. Sun only, no objects needed",
+  "must": { "op": "gt", "x": { "f": "gap_width_deg" }, "than": { "num": 6 } },
+  "score": { "op": "mul", "of": [
+    { "op": "and", "of": [
+      { "op": "ramp", "x": { "f": "gap_width_deg" }, "lo": 6, "hi": 9 },
+      { "op": "ramp", "x": { "f": "gap_width_deg" }, "lo": 20, "hi": 14 }
+    ] },
+    { "op": "ramp", "x": { "f": "sun_hidden_elev" }, "lo": 6, "hi": 2 }
+  ] }
+}
