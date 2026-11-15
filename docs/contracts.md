@@ -40,6 +40,7 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `Building` | defined | costar | `building::{Building, BuildingList}` | `buildings.json` |
 | `ApiError` | defined | server | `error::ApiError` | `error.json` |
 | `AgentRequest`, `CallSheet` | defined | server | `agent::{AgentRequest, CallSheet}` | `agent_request.json`, `call_sheet.json` |
+| `ChatRequest`, `ChatReply` | defined | server | `agent::{ChatRequest, ChatReply, ChatMessage, ChatAsk}` | `chat_request.json`, `chat_reply.json` |
 | `MeshAt` | defined | server | none yet (built with `json!` in `crates/server/src/mesh.rs`; the fixture isn't parse-tested) | `mesh_at.json` |
 
 All fixtures are in `fixtures/`. `cargo test -p contracts` checks every fixture parses into its struct.
@@ -60,6 +61,7 @@ Server: `http://localhost:8787` (`crates/server`). All `GET` parameters are quer
 | `GET /api/buildings` | `BuildingList` | CoStar buildings near a point (who to ask for access) |
 | `GET /api/buildings/{id}` | `Building` | One building |
 | `POST /api/agent` | `CallSheet` | Free-text brief in, call sheet out (the agent) |
+| `POST /api/chat` | `ChatReply` | The brief as a chat: the agent asks up to 3 questions, then searches and returns the call sheet |
 | `GET /api/tiles/vexcel/{z}/{x}/{y}` | JPEG/PNG tile, or **204** | Vexcel aerial map tiles for MapLibre (XYZ, z0–21). 204 = no imagery for us here: show the fallback (Esri World Imagery). 400 for an impossible tile. `Cache-Control` 7 days. |
 | `GET /api/mesh/at` | `MeshAt`, or **404** | Is there a Vexcel textured 3D mesh at this point? 404 = none here: use the height-map 3D view |
 | `GET /api/mesh/near/{lat}/{lon}/{r}/tileset.json?...` | 3D Tiles tileset JSON | Vexcel's tileset through our proxy (key hidden), trimmed to `r` m (50–20000) around the point. Child URIs are relative, so they stay on the proxy |
@@ -479,6 +481,50 @@ From `GET /api/mesh/at`.
 | `collection` | The Vexcel 3D collection covering the point. |
 | `tileset_url` | Relative to the API base. A 3D Tiles tileset (load with e.g. 3d-tiles-renderer), trimmed to 3000 m around the point. |
 | `attribution` | Must be shown on the 3D view (Vexcel licence). |
+
+### ChatRequest and ChatReply
+`POST /api/chat` is the brief as a short conversation, in front of the same agent as `/api/agent`. It's **stateless**: the
+client sends the whole conversation every turn. Each turn the agent (Claude, else the offline mock) either asks **one**
+short question with quick-reply choices, or settles the `Brief`, runs the agent's search -> call sheet steps and returns both.
+It asks at most 3 questions, never about something the text already answers, and the first choice is always its default.
+A question comes back in ~2 s; the final turn takes as long as `/api/agent`.
+
+Request (`ChatRequest`):
+```json
+{
+  "messages": [
+    { "role": "user", "text": "fountain in front of a tower at sunset" },
+    { "role": "agent", "text": "Where should I look?" },
+    { "role": "user", "text": "Downtown LA" }
+  ],
+  "area": null, "date": null, "tz": "America/Los_Angeles", "go": false
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `messages` | required | Oldest first. The first and the last are the user's (`role`: `user` or `agent`). At most 24, each at most 1000 characters. |
+| `area`, `date`, `tz` | `null`, `null`, LA | As in `AgentRequest`: a given area or date wins over the chat. |
+| `go` | `false` | "Search now": skip any remaining questions and use the defaults. Then the last message may be the agent's. |
+
+Response (`ChatReply`): exactly one of `ask` or (`brief` + `sheet`).
+```json
+{
+  "understood": ["Sunset", "Downtown LA"],
+  "ask": { "question": "Rooftop or street level?", "choices": ["Either is fine", "Rooftop", "Street level"] },
+  "brief": null, "sheet": null, "model": "mock"
+}
+```
+- `understood`: the brief so far in plain words. While asking, only what the user said; once searching, every field,
+  with the agent's own defaults ending in ` (my pick)`,
+  and goals the search can't score yet ending in ` (not checked yet)`.
+- `ask.choices`: quick replies, the default first. May be empty (free text).
+- `brief`: the brief the chat settled on, including its `goals` (see [Goals](#goals-and-cost-functions)): the sun goal
+  for the framing (`{"use": "sun_between"}`) plus object goals as data, with kinds in the user's words
+  (`{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`). `sheet`: the `CallSheet` (its
+  `brief` may be relaxed or widened from it); its `steps` start with a `chat` step.
+- `note`: one plain sentence to show with the results, e.g. what the search couldn't check yet. Left out when empty.
+- `model`: who ran this turn, model id or `"mock"`.
 
 ### AgentRequest and CallSheet
 `POST /api/agent` turns a typed brief into a call sheet. The agent (Claude when `ANTHROPIC_API_KEY` is set, else an offline mock)
