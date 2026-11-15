@@ -8,10 +8,12 @@
 //!   questions in order: where, how the sun sits in the frame, roof or street.
 //! - `go: true` (or the user saying "just search") skips the remaining questions and uses the defaults.
 //!
-//! This is the front end of the agent: when `Brief.goals` lands (task 050) the same turn returns goals.
+//! The settled brief carries `goals` (docs/contracts.md#goals-and-cost-functions) alongside the old fields:
+//! for now one library goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`), which is
+//! what an empty `goals` means anyway, so the search is unchanged until core reads goals (task 051).
 
 use super::*;
-use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole};
+use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal};
 
 /// The most questions the agent asks before it searches with its defaults.
 pub const MAX_ASKS: usize = 3;
@@ -88,7 +90,8 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     let go = req.go || asked >= MAX_ASKS || wants_go(&req.messages);
     let ask = if go { None } else { turn.ask };
 
-    let (brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
+    let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
+    brief.goals = goals_for(&brief);
     let mut known = turn.known;
     if req.area.is_some() {
         known.push(Topic::Place);
@@ -122,6 +125,16 @@ fn user_text(m: &[ChatMessage]) -> String {
         .filter(|t| !t.is_empty())
         .collect::<Vec<_>>()
         .join(". ")
+}
+
+/// Pure: the goals for a settled brief. One library goal per framing; the seed library (task 051) names them.
+fn goals_for(b: &Brief) -> Vec<Goal> {
+    let name = match b.framing {
+        Framing::Clear => "sun_clear",
+        Framing::Between => "sun_between",
+        Framing::Behind => "sun_behind",
+    };
+    vec![Goal::using(name)]
 }
 
 /// Pure: how many questions the agent has asked so far.
@@ -381,6 +394,8 @@ mod tests {
             standing: Standing::Any,
             framing: Framing::Between,
             max_spots: 10,
+            goals: Vec::new(),
+            lens_deg: contracts::DEFAULT_LENS_DEG,
         };
         let p = Place { name: "Princeton".into(), area: b.area.clone(), tz: b.tz.clone() };
         let k = [Topic::Event, Topic::Framing, Topic::Place];
@@ -412,6 +427,16 @@ mod tests {
         assert!(p.contains("Saturday 2026-11-14"));
         assert!(!p.contains("picked the area"));
         assert!(p.contains("offer Downtown LA and Princeton first"));
+    }
+
+    #[test]
+    fn goals_name_the_framing() {
+        let mut b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
+        assert_eq!(serde_json::to_value(goals_for(&b)).unwrap(), json!([{"use": "sun_between"}]));
+        b.framing = Framing::Behind;
+        assert_eq!(goals_for(&b)[0].name(), "sun_behind");
+        b.framing = Framing::Clear;
+        assert_eq!(goals_for(&b)[0].name(), "sun_clear");
     }
 
     // ---- whole turns: synthetic grid, no network ----
@@ -447,7 +472,10 @@ mod tests {
         assert!(r.ask.is_none());
         let sheet = r.sheet.expect("searched");
         assert_eq!(sheet.spots[0].role, contracts::SpotRole::Primary);
-        assert_eq!(r.brief.unwrap().text, "a sunset shot. A clear view of the sun. Either is fine");
+        let brief = r.brief.unwrap();
+        assert_eq!(brief.text, "a sunset shot. A clear view of the sun. Either is fine");
+        assert_eq!(brief.goals, [Goal::using("sun_clear")], "goals alongside the old fields");
+        assert_eq!(brief.framing, Framing::Clear);
         assert!(sheet.steps.first().is_some_and(|s| s.tool == "chat" && s.summary.contains("after 2 questions")), "{:?}", sheet.steps);
     }
 
