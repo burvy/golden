@@ -397,9 +397,9 @@ fn spot_summary(s: &Spot) -> Value {
 
 /// Pure: the brief as Claude first sees it.
 fn first_message(b: &Brief, place: &str) -> String {
-    let brief = json!({"text": b.text, "place": place, "area": b.area, "date": b.date, "event": b.event, "standing": b.standing, "framing": b.framing});
+    let brief = json!({"text": b.text, "place": place, "area": b.area, "date": b.date, "event": b.event, "standing": b.standing, "framing": b.framing, "goals": b.goals});
     format!(
-        "The photographer's brief, as read: {brief}\n\
+        "The photographer's brief, as read (its goals are what the chat settled on: start from them): {brief}\n\
          Plan the search: reuse or write cost functions that capture what they asked for, test them, search, \
          look at the best spots, and finish with the order you recommend."
     )
@@ -415,12 +415,14 @@ pub fn system_prompt() -> String {
          You choose or write the cost functions; every number comes from the tools, never from you.\n\n\
          How to work:\n\
          1. list_cost_functions. If one already captures the brief, use it. Reusing is better than writing.\n\
-         2. Otherwise define_cost_function. It's checked, then test-run on ~50 points of this area: read the error, or the verdict \
+         2. Otherwise define_cost_function. It's checked, then test-run on every point of this area: read the error, or the verdict \
             and the best/median/worst examples, and fix and define again if it doesn't separate good points from bad. At most {MAX_DEFINES} defines.\n\
          3. save_cost_function when it captures a reusable class of shot. Name it for the class (stays_sunny_rooftop), not for this place.\n\
          4. search with 1-{MAX_GOALS} goals. 5. investigate the top 1-{MAX_INVESTIGATE} spots. 6. finish with the order you recommend and one sentence why.\n\
-         find_objects lists what's in the area (CoStar buildings, Vexcel detections: {kinds}). Object features (dist, bearing, visible) \
-         are being added to the expression language; until the checker accepts them, use objects only to inform the plan.\n\n\
+         find_objects lists what's in the area (CoStar buildings, Vexcel detections: {kinds}). Object features take an object: \
+         {{\"f\": \"dist\", \"obj\": \"a\"}} names a param (a goal fills it with args; define_cost_function takes args to test it with), \
+         {{\"f\": \"dist\", \"obj\": {{\"kind\": \"tree\"}}}} names one inline. A library function with params is used with args: \
+         {{\"use\": \"in_front\", \"args\": {{\"a\": {{\"kind\": \"tree\"}}, \"b\": {{\"kind\": \"building\"}}}}}}.\n\n\
          Features (cost tier: point is cheap, skyline is the expensive sun trace):\n{features}\n\n\
          Expressions (JSON, every one evaluates to a number; scores are clamped to 0..1):\n\
          {{\"f\": \"<feature>\"}}  {{\"num\": 0.5}}\n\
@@ -693,6 +695,16 @@ mod tests {
             ("define_cost_function", json!({"cost_function": "{\"name\":\"x\"}"}), "not a cost function"),
             ("define_cost_function", json!({"cost_function": r#"{"name":"sun_clear","about":"x","score":{"num":1}}"#}), "already a seed"),
             ("find_objects", json!({"kinds": ["fountain"]}), "unknown kind"),
+            (
+                "define_cost_function",
+                json!({"cost_function": r#"{"name":"near_a","about":"x","params":["a"],"score":{"op":"ramp","x":{"f":"dist","obj":"a"},"lo":300,"hi":0}}"#, "args": ""}),
+                "pass args to test it with",
+            ),
+            (
+                "define_cost_function",
+                json!({"cost_function": r#"{"name":"near_b","about":"x","params":["a"],"score":{"op":"ramp","x":{"f":"dist","obj":"a"},"lo":300,"hi":0}}"#, "args": r#"{"a":{"kind":"tree"}}"#}),
+                "tree",
+            ),
             ("nope", json!({}), "no tool"),
         ] {
             let e = s.call(tool, &input).await.err().unwrap_or_else(|| panic!("{tool} {input} should fail"));
