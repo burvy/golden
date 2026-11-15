@@ -32,7 +32,8 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `DsmGrid` | defined | vexcel | `dsm::DsmGrid` | `dsm_grid.json` + `dsm_grid.f32` |
 | `SunPath` | defined | core | `sun::SunPath` | `sun_path.json` |
 | `HorizonProfile` | defined | core | `horizon::HorizonProfile` | `horizon_profile.json` |
-| `Brief` | defined | server | `search::Brief` | `brief.json` |
+| `Brief` | defined | server | `search::Brief` | `brief.json` (old style), `brief_goals.json` (with goals) |
+| `Goal`, `CostFn`, `Expr`, `ObjRef`, `Object`, `Rated` | defined | core | `goal::*` | `brief_goals.json`, `search_result.json` |
 | `Spot`, `SearchResult` | defined | core | `search::{Spot, SearchResult}` | `search_result.json` |
 | `SceneMeta` | defined | server | `scene::SceneMeta` | `scene_meta.json` + `scene.bin` |
 | `PhotoMeta` | defined | server | `photo::PhotoMeta` | `photo_meta.json` |
@@ -284,6 +285,8 @@ What the filmmaker wants. `POST /api/search` body.
 | `standing` | `"any"` | `"ground"` (street level), `"roof"` (on a roof, so needs access), or `"any"`. |
 | `framing` | `"clear"` | `"clear"`: sun visible down to the horizon, as long as possible. `"between"`: sun sets into a gap between two buildings. `"behind"`: sun sets behind a building (silhouette). |
 | `max_spots` | `10` | 1–50. |
+| `goals` | `[]` | What the shot should do, see [Goals](#goals-and-cost-functions). Empty means `[{"use": "sun_<framing>"}]`, i.e. exactly the sunset search from before goals. Left out of the JSON while empty. |
+| `lens_deg` | `60` | Horizontal lens angle for "in one frame" checks (60 is about 30 mm on full frame). |
 
 ### SearchResult and Spot
 `POST /api/search` response.
@@ -324,8 +327,62 @@ What the filmmaker wants. `POST /api/search` body.
 | `spot.sun` | Same shape and meaning as `HorizonProfile.sun`. For `event: "sunrise"`, `hidden_at` is when the sun first *appears* over the skyline. |
 | `spot.why` | Short plain-English reasons, best first, to show on the spot card. |
 | `spot.building_id` | CoStar building the spot is on (roof spots), or `null`. Look it up with `/api/buildings/{id}`. |
+| `spot.scores` | One `{goal, score, why}` per goal of the brief (the implicit sun goal if it had none), same order. `score` 0–1. Defaults to `[]` when reading older results. `spot.score` stays the overall rank score; `sun` and `why` stay as they were. |
 | `heat` | Coarse score map for the heatmap layer. Same grid layout as `DsmGrid` (row 0 = north, row-major). `values` are 0–1, `null` where nothing was searched. At most 40×40 = 1,600 values. |
 | `searched`, `took_ms` | How many candidate points were scored, and how long it took. |
+
+### Goals and cost functions
+Part of `Brief` (`goals`). The design and the reasons are in `docs/metrics.md` (v2). Rust: `contracts::goal`.
+
+A **goal** uses a library cost function by name, or brings one inline:
+```jsonc
+{ "use": "sun_between", "weight": 1.0 }
+{ "use": "in_front", "args": { "a": { "kind": "tree" }, "b": { "id": "costar:1234567" } }, "must": true }
+{ "def": { "name": "...", "about": "...", "score": { "f": "sun_clear" } }, "weight": 0.5 }
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `use` | | Name of a library cost function (`library/*.json`, or saved at runtime). Exactly one of `use` / `def`. |
+| `args` | `{}` | Object references for the function's `params`, by name. Only with `use`. |
+| `def` | | An inline `CostFn` (written for this brief, not saved). |
+| `weight` | `1` (`0` if `must`) | Share of the ranking score: a spot's `score` is the weighted sum of its goal scores, normalised so the best candidate is 1. |
+| `must` | `false` | A gate: a candidate scoring 0 on this goal is dropped. |
+
+A **cost function** (`CostFn`), also the format of library entries:
+
+| Field | Meaning |
+|---|---|
+| `name` | snake_case, unique in the library. Shown as `Spot.scores[].goal`. |
+| `about` | One line for people and the agent. Starts each spot's `why` for this goal. |
+| `params` | Names of object parameters (default `[]`), filled in by a goal's `args`. |
+| `must` | Optional expression. Where it's 0 the candidate is dropped, whatever the goal's weight. |
+| `score` | Expression, clamped to 0–1. Higher is better. |
+
+An **expression** (`Expr`) is a JSON tree that always evaluates to a number:
+```jsonc
+{"f": "sun_visible_min"}                        // feature; object features take "obj", or "a" and "b"
+{"num": 0.5}                                    // number
+{"op": "ramp", "x": E, "lo": 20, "hi": 5}       // 0 at lo, 1 at hi, linear, clamped (lo > hi allowed, lo != hi)
+{"op": "bump", "x": E, "at": 0, "width": 10}    // 1 at `at`, falling to 0 at +-width (width > 0)
+{"op": "and" | "or" | "min" | "max" | "mul" | "add" | "avg", "of": [E, ...]}   // at least one
+{"op": "not", "x": E}
+{"op": "lt" | "gt", "x": E, "than": E}          // 0 or 1
+```
+Parsing rejects an unknown `op`, a missing or extra key, and non-finite numbers, with a message that says
+what to fix. Which **features** exist (and their tier, Point < Ray < Skyline) is core's business: `core::expr`
+checks names and parameters before a search runs. The feature list is in `docs/metrics.md`.
+
+An **object reference** (`ObjRef`): `{"id": "costar:1234567"}`, or `{"kind": "tree", "near": <ObjRef>, "within_m": 300}`
+meaning the best-scoring object of that kind (optionally within `within_m` of another). Inside an expression an
+object argument is either a parameter name (`"a"`) or an inline `ObjRef`. Kinds are label strings; the checked ones
+are in `goal::OBJECT_KINDS` (`building`, `tree`, `car`, `rooftop HVAC unit`, `swimming pool`, `water tower`).
+
+An **object** (`Object`), as object sources hand them to core:
+`{ "id": "costar:1234567", "kind": "building", "lat": 34.0501, "lon": -118.2533, "base_m": 88.0, "top_m": 310.0, "radius_m": 30.0, "source": "costar" }`.
+Heights are on the same datum as `DsmGrid`.
+
+`Rated` (`Spot.scores[]`): `{ "goal": "sun_between", "score": 0.91, "why": "Sun sets into a gap between two buildings: ..." }`.
 
 ### SceneMeta (+ binary)
 Heights for the 3D view, in rings of decreasing detail, so the phone draws ~200k cells instead of millions.

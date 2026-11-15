@@ -32,7 +32,10 @@
         "39 min of golden hour in view",
         "Roof 46 m up"
       ],
-      "building_id": "costar:1234567"
+      "building_id": "costar:1234567",
+      "scores": [
+        { "goal": "sun_between", "score": 0.91, "why": "Sun sets into a gap between two buildings: 6.0 deg gap, 39 min of golden hour in view" }
+      ]
     },
     {
       "id": "s-34.04788--118.24931-roof",
@@ -52,7 +55,10 @@
         "golden_min_visible": 22
       },
       "why": ["Sun sets into a wide gap between two towers at 19:41", "22 min of golden hour in view"],
-      "building_id": null
+      "building_id": null,
+      "scores": [
+        { "goal": "sun_between", "score": 0.74, "why": "Sun sets into a gap between two buildings: 11.5 deg gap, 22 min of golden hour in view" }
+      ]
     }
   ],
   "heat": {

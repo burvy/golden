@@ -9,6 +9,7 @@ pub mod agent;
 pub mod building;
 pub mod dsm;
 pub mod error;
+pub mod goal;
 pub mod horizon;
 pub mod photo;
 pub mod scene;
@@ -19,6 +20,7 @@ pub use agent::{Access, AgentRequest, AgentStep, CallSheet, SheetSpot, SpotRole,
 pub use building::{Building, BuildingList, Contact, ContactRole, Matterport};
 pub use dsm::{DsmFileError, DsmGrid, DsmMeta, DsmSource, EARTH_R, NODATA};
 pub use error::ApiError;
+pub use goal::{CmpOp, CostFn, Expr, Goal, GoalFn, ListOp, ObjArg, ObjRef, Object, Rated, DEFAULT_LENS_DEG, EXPR_OPS, OBJECT_KINDS};
 pub use horizon::{HorizonPoint, HorizonProfile, Observer, SunBlock};
 pub use photo::{PhotoKind, PhotoMeta};
 pub use scene::{SceneMeta, SceneRing};
