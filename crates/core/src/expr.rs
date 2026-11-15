@@ -5,20 +5,23 @@
 //! every problem with its place in the expression, worded so the agent can fix it. A `Checked`
 //! function knows its tier and evaluates on one candidate through a feature lookup the caller
 //! provides, so this module needs no grid, no sun and no objects.
+//!
+//! The objects a function names (`"obj": "a"` for a parameter, or an inline `{"kind": ...}`) are
+//! collected into `Checked::refs`, once each; a `Call` points into that list by index. Which real
+//! object each one is gets decided later, per goal (`objects::bind`).
 
 use contracts::{CmpOp, CostFn, Expr, ListOp, ObjArg};
 
-use crate::features::{Feature, Tier, FEATURES};
-
-/// Object features from the design that aren't built yet (next task). Named so the error can say
-/// "not yet" instead of "unknown".
-const COMING_FEATURES: &[&str] = &["dist", "bearing", "bearing_diff", "size_deg", "visible", "sun_bearing_diff"];
+use crate::features::{Call, Feature, Slot, Takes, Tier, FEATURES};
+use crate::objects::MAX_OBJECTS_PER_FN;
 
 /// A cost function whose features are all known. Evaluate with `eval`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Checked {
     pub name: String,
     pub about: String,
+    /// The objects the expressions name, each once; `Call::objs` index this.
+    pub refs: Vec<ObjArg>,
     pub must: Option<Node>,
     pub score: Node,
 }
@@ -28,12 +31,31 @@ impl Checked {
     pub fn tier(&self) -> Tier {
         self.must.as_ref().map_or(Tier::Point, Node::tier).max(self.score.tier())
     }
+
+    /// How `refs[slot]` reads in a reason: the parameter name, the id, or the kind.
+    pub fn label(&self, slot: Slot) -> String {
+        match &self.refs[usize::from(slot)] {
+            ObjArg::Param(p) => p.clone(),
+            ObjArg::Ref(contracts::ObjRef::Id(id)) => id.clone(),
+            ObjArg::Ref(contracts::ObjRef::Kind { kind, .. }) => kind.clone(),
+        }
+    }
+
+    /// `dist(a)`, `bearing_diff(a, tree)`, `roof`: a call as it reads in a reason.
+    pub fn call_text(&self, c: Call) -> String {
+        let args: Vec<String> = c.objs.iter().flatten().map(|&s| self.label(s)).collect();
+        if args.is_empty() {
+            c.f.name().to_string()
+        } else {
+            format!("{}({})", c.f.name(), args.join(", "))
+        }
+    }
 }
 
 /// A checked expression: `contracts::Expr` with features resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
-    Feat(Feature),
+    Feat(Call),
     Num(f64),
     Ramp { x: Box<Node>, lo: f64, hi: f64 },
     Bump { x: Box<Node>, at: f64, width: f64 },
@@ -70,48 +92,84 @@ pub fn check(cost: &CostFn) -> Result<Checked, Vec<ExprError>> {
             errors.push(err(&format!("params[{i}]"), format!("{p:?} is empty or repeated")));
         }
     }
-    let must = cost.must.as_ref().map(|e| compile(e, "must", &mut errors));
-    let score = compile(&cost.score, "score", &mut errors);
+    let mut c = Compiler { params: &cost.params, refs: Vec::new(), errors };
+    let must = cost.must.as_ref().map(|e| c.compile(e, "must"));
+    let score = c.compile(&cost.score, "score");
+    let Compiler { refs, errors, .. } = c;
     if !errors.is_empty() {
         return Err(errors);
     }
-    Ok(Checked { name: cost.name.clone(), about: cost.about.clone(), must, score })
+    Ok(Checked { name: cost.name.clone(), about: cost.about.clone(), refs, must, score })
 }
 
-fn compile(e: &Expr, at: &str, errors: &mut Vec<ExprError>) -> Node {
-    let sub = |x: &Expr, key: &str, errors: &mut Vec<ExprError>| Box::new(compile(x, &format!("{at}.{key}"), errors));
-    match e {
-        Expr::Feature { f, obj, a, b } => match feature(f, [obj, a, b]) {
-            Ok(feat) => Node::Feat(feat),
-            Err(msg) => {
-                errors.push(ExprError { at: at.to_string(), msg });
-                Node::Num(0.0)
+/// Walks an expression, resolving features and collecting the objects it names.
+struct Compiler<'a> {
+    params: &'a [String],
+    refs: Vec<ObjArg>,
+    errors: Vec<ExprError>,
+}
+
+impl Compiler<'_> {
+    fn compile(&mut self, e: &Expr, at: &str) -> Node {
+        let sub = |c: &mut Self, x: &Expr, key: &str| Box::new(c.compile(x, &format!("{at}.{key}")));
+        match e {
+            Expr::Feature { f, obj, a, b } => match self.feature(f, obj, a, b) {
+                Ok(call) => Node::Feat(call),
+                Err(msg) => {
+                    self.errors.push(ExprError { at: at.to_string(), msg });
+                    Node::Num(0.0)
+                }
+            },
+            Expr::Num(n) => Node::Num(*n),
+            Expr::Ramp { x, lo, hi } => Node::Ramp { x: sub(self, x, "x"), lo: *lo, hi: *hi },
+            Expr::Bump { x, at: c, width } => Node::Bump { x: sub(self, x, "x"), at: *c, width: *width },
+            Expr::List { op, of } => {
+                let of = of.iter().enumerate().map(|(i, x)| self.compile(x, &format!("{at}.of[{i}]"))).collect();
+                Node::List { op: *op, of }
             }
-        },
-        Expr::Num(n) => Node::Num(*n),
-        Expr::Ramp { x, lo, hi } => Node::Ramp { x: sub(x, "x", errors), lo: *lo, hi: *hi },
-        Expr::Bump { x, at: c, width } => Node::Bump { x: sub(x, "x", errors), at: *c, width: *width },
-        Expr::List { op, of } => {
-            let of = of.iter().enumerate().map(|(i, x)| compile(x, &format!("{at}.of[{i}]"), errors)).collect();
-            Node::List { op: *op, of }
+            Expr::Not(x) => Node::Not(sub(self, x, "x")),
+            Expr::Cmp { op, x, than } => Node::Cmp { op: *op, x: sub(self, x, "x"), than: sub(self, than, "than") },
         }
-        Expr::Not(x) => Node::Not(sub(x, "x", errors)),
-        Expr::Cmp { op, x, than } => Node::Cmp { op: *op, x: sub(x, "x", errors), than: sub(than, "than", errors) },
     }
-}
 
-/// Resolve a feature name and check its object arguments.
-fn feature(name: &str, objs: [&Option<ObjArg>; 3]) -> Result<Feature, String> {
-    if COMING_FEATURES.contains(&name) {
-        return Err(format!("feature \"{name}\" needs objects, which search doesn't have yet; for now use {}", feature_names()));
+    /// Resolve a feature name and check (and collect) its objects.
+    fn feature(&mut self, name: &str, obj: &Option<ObjArg>, a: &Option<ObjArg>, b: &Option<ObjArg>) -> Result<Call, String> {
+        let Some(f) = Feature::by_name(name) else {
+            return Err(format!("unknown feature \"{name}\"; features are {}", feature_names()));
+        };
+        let objs = match (f.info().takes, obj, a, b) {
+            (Takes::Nothing, None, None, None) => [None, None],
+            (Takes::Nothing, ..) => return Err(format!("feature \"{name}\" takes no object (obj, a, b)")),
+            (Takes::One, Some(o), None, None) => [Some(self.slot(o)?), None],
+            (Takes::One, ..) => {
+                return Err(format!("feature \"{name}\" takes one object as \"obj\": a parameter like \"a\" or {{\"kind\": \"tree\"}}"))
+            }
+            (Takes::Two, None, Some(x), Some(y)) => [Some(self.slot(x)?), Some(self.slot(y)?)],
+            (Takes::Two, ..) => return Err(format!("feature \"{name}\" takes two objects as \"a\" and \"b\"")),
+        };
+        Ok(Call { f, objs })
     }
-    let Some(f) = Feature::by_name(name) else {
-        return Err(format!("unknown feature \"{name}\"; features are {}", feature_names()));
-    };
-    if objs.iter().any(|o| o.is_some()) {
-        return Err(format!("feature \"{name}\" takes no object (obj, a, b)"));
+
+    /// The slot of an object argument, adding it if it's new. A parameter must be declared.
+    fn slot(&mut self, o: &ObjArg) -> Result<Slot, String> {
+        if let ObjArg::Param(p) = o {
+            if !self.params.contains(p) {
+                return Err(if self.params.is_empty() {
+                    format!("\"{p}\" isn't a parameter (this function has none); name the object inline, like {{\"kind\": \"tree\"}}")
+                } else {
+                    format!("\"{p}\" isn't a parameter (params: {})", self.params.join(", "))
+                });
+            }
+        }
+        if let Some(i) = self.refs.iter().position(|r| r == o) {
+            return Ok(i as Slot);
+        }
+        if self.refs.len() == MAX_OBJECTS_PER_FN {
+            return Err(format!("a cost function can name at most {MAX_OBJECTS_PER_FN} objects"));
+        }
+        self.refs.push(o.clone());
+        Ok((self.refs.len() - 1) as Slot)
     }
-    Ok(f)
 }
 
 fn feature_names() -> String {
@@ -122,12 +180,12 @@ impl Node {
     /// The most expensive tier among the features in this expression (Point if it has none).
     pub fn tier(&self) -> Tier {
         let mut tier = Tier::Point;
-        self.each_feature(&mut |f| tier = tier.max(f.tier()));
+        self.each_feature(&mut |c| tier = tier.max(c.f.tier()));
         tier
     }
 
-    /// Every feature in the expression, depth first, repeats included.
-    pub fn each_feature(&self, visit: &mut impl FnMut(Feature)) {
+    /// Every feature call in the expression, depth first, repeats included.
+    pub fn each_feature(&self, visit: &mut impl FnMut(Call)) {
         match self {
             Node::Feat(f) => visit(*f),
             Node::Num(_) => {}
@@ -141,9 +199,9 @@ impl Node {
     }
 }
 
-/// The value of `node` on one candidate, with `value(f)` giving each feature's number.
+/// The value of `node` on one candidate, with `value(call)` giving each feature's number.
 /// Not clamped; see `score_of` for a 0..1 score.
-pub fn eval(node: &Node, value: &mut impl FnMut(Feature) -> f64) -> f64 {
+pub fn eval(node: &Node, value: &mut impl FnMut(Call) -> f64) -> f64 {
     match node {
         Node::Feat(f) => value(*f),
         Node::Num(n) => *n,
@@ -176,7 +234,7 @@ pub fn eval(node: &Node, value: &mut impl FnMut(Feature) -> f64) -> f64 {
 }
 
 /// `eval`, clamped to 0..1 (anything not finite counts as 0).
-pub fn score_of(node: &Node, value: &mut impl FnMut(Feature) -> f64) -> f64 {
+pub fn score_of(node: &Node, value: &mut impl FnMut(Call) -> f64) -> f64 {
     clamp01(eval(node, value))
 }
 
@@ -198,7 +256,7 @@ mod tests {
 
     fn run(score: &str, value: impl Fn(Feature) -> f64) -> f64 {
         let c = check(&cost(&format!(r#"{{"name":"t","about":"t","score":{score}}}"#))).unwrap();
-        score_of(&c.score, &mut |f| value(f))
+        score_of(&c.score, &mut |c: Call| value(c.f))
     }
 
     #[test]
@@ -240,7 +298,8 @@ mod tests {
         let bad = cost(
             r#"{"name":"Bad Name","about":" ","params":["a","a"],
                 "must":{"f":"sun_clear","obj":"a"},
-                "score":{"op":"and","of":[{"f":"roof"},{"f":"sunclear"},{"op":"not","x":{"f":"dist","obj":"a"}}]}}"#,
+                "score":{"op":"and","of":[{"f":"roof"},{"f":"sunclear"},{"op":"not","x":{"f":"dist","obj":"c"}},
+                    {"f":"dist","a":"a"},{"f":"bearing_diff","a":"a"}]}}"#,
         );
         let errs = check(&bad).unwrap_err();
         let text: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
@@ -250,7 +309,28 @@ mod tests {
         assert!(has("params[1]", "repeated"), "{text:?}");
         assert!(has("must", "takes no object"), "{text:?}");
         assert!(has("score.of[1]", "unknown feature \"sunclear\"; features are ground_m"), "{text:?}");
-        assert!(has("score.of[2].x", "needs objects"), "{text:?}");
-        assert_eq!(errs.len(), 6);
+        assert!(has("score.of[2].x", "\"c\" isn't a parameter (params: a, a)"), "{text:?}");
+        assert!(has("score.of[3]", "takes one object as \"obj\""), "{text:?}");
+        assert!(has("score.of[4]", "takes two objects as \"a\" and \"b\""), "{text:?}");
+        assert_eq!(errs.len(), 8);
+    }
+
+    #[test]
+    fn objects_are_collected_once_each() {
+        let c = check(&cost(
+            r#"{"name":"t","about":"t","params":["a","b"],
+                "must":{"op":"lt","x":{"f":"dist","obj":"a"},"than":{"f":"dist","obj":"b"}},
+                "score":{"op":"avg","of":[{"f":"visible","obj":"b"},{"f":"bearing_diff","a":"a","b":{"kind":"tree"}},
+                    {"f":"size_deg","obj":{"kind":"tree"}}]}}"#,
+        ))
+        .unwrap();
+        let tree: ObjArg = serde_json::from_str(r#"{"kind":"tree"}"#).unwrap();
+        assert_eq!(c.refs, vec![ObjArg::Param("a".into()), ObjArg::Param("b".into()), tree]);
+        let mut calls = Vec::new();
+        c.score.each_feature(&mut |k| calls.push(c.call_text(k)));
+        assert_eq!(calls, ["visible(b)", "bearing_diff(a, tree)", "size_deg(tree)"]);
+        assert_eq!(c.tier(), Tier::Ray);
+        let no_params = check(&cost(r#"{"name":"t","about":"t","score":{"f":"dist","obj":"a"}}"#)).unwrap_err();
+        assert!(no_params[0].msg.contains("this function has none"), "{no_params:?}");
     }
 }

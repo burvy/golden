@@ -1,0 +1,17 @@
+{
+  "name": "beside",
+  "about": "a next to b in one frame, either side, at least 3 deg apart so they don't overlap",
+  "params": ["a", "b"],
+  "must": { "op": "and", "of": [
+    { "f": "in_frame", "a": "a", "b": "b" },
+    { "op": "gt", "x": { "op": "max", "of": [
+      { "f": "bearing_diff", "a": "a", "b": "b" },
+      { "op": "mul", "of": [{ "f": "bearing_diff", "a": "a", "b": "b" }, { "num": -1 }] }
+    ] }, "than": { "num": 3 } }
+  ] },
+  "score": { "op": "avg", "of": [
+    { "f": "in_frame", "a": "a", "b": "b" },
+    { "f": "visible", "obj": "a" },
+    { "f": "visible", "obj": "b" }
+  ] }
+}
