@@ -24,7 +24,8 @@
 //! 4. **Layers.** Each goal's score at every cell's candidate (`GoalLayer`), and how many
 //!    candidates each gate left (`Stage`), so the browser can re-weight goals without a second
 //!    scoring engine (docs/contracts.md#goal-layers-and-stages). A gate still short-circuits: at
-//!    a dropped candidate only the goal that dropped it has a value (0), the rest are `null`.
+//!    a dropped candidate the goal that dropped it has 0, the gates before it keep their scores,
+//!    and the goals not reached are `null`.
 //! 5. **Pick.** Normalise the scores to 0..1 and take the best, at least `spacing` apart (between
 //!    cell centres, the rule the browser repeats).
 //! 6. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
@@ -227,8 +228,8 @@ pub fn search_with(grid: &DsmGrid, brief: &Brief, inputs: &Inputs, utc_offset_s:
     Ok(SearchOutput { spots, heat, searched: scored.len() as u32, layers, stages, spacing_m: spacing, objects })
 }
 
-/// Each goal's raw score at every cell's candidate (`null` where the cell has none, or a gate
-/// dropped the candidate before the goal ran), and the cells its own `must` drops.
+/// Each goal's raw score at every cell's candidate (`null` where the cell has none, or an
+/// earlier gate dropped the candidate), and the cells its own `must` drops.
 fn layers_of(goals: &[Ready], scored: &[Scored], heat: &HeatGrid) -> Vec<GoalLayer> {
     goals
         .iter()
@@ -604,7 +605,7 @@ struct GoalRun<'a> {
 /// One candidate through the funnel.
 #[derive(Debug, Clone, PartialEq)]
 struct Eval {
-    /// Per goal, its score (its best passing choice); `None` for the goals a gate cut off.
+    /// Per goal, its score (its best passing choice); `None` for the goals not reached before a gate dropped it.
     values: Vec<Option<f64>>,
     /// The ranking score (0 if dropped).
     raw: f64,
@@ -646,7 +647,8 @@ impl<'a> Funnel<'a> {
 
     /// Run a candidate through the gates, then score every goal. `value(call, choice)` is a
     /// feature's number with the goal's objects as picked by `choice`. At the first gate that
-    /// drops it, that goal gets 0 and the rest aren't computed.
+    /// drops it, that goal gets 0, the gates already passed keep their scores, and the goals not
+    /// reached yet aren't computed.
     fn evaluate(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Eval {
         let n = self.goals.len();
         let mut passing = vec![u64::MAX; n];
@@ -654,6 +656,9 @@ impl<'a> Funnel<'a> {
             let mask = self.mask(i, value);
             if mask == 0 {
                 let mut values = vec![None; n];
+                for &j in &self.gated[..k] {
+                    values[j] = Some(self.best(j, passing[j], value).1);
+                }
                 values[i] = Some(0.0);
                 let gate = self.fn_gate_fails(i, value).then_some(i);
                 return Eval { values, raw: 0.0, dropped: Some(k), gate };

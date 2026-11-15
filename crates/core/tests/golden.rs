@@ -99,20 +99,20 @@ fn cases(prefix: &str, lat: f64, lon: f64, radius_m: f64, runs: &[(&str, i32, Ev
 
 // ---- the browser's rule ----------------------------------------------------------------------
 
-/// The browser's rebuild (a copy of `rebuild` in crates/contracts/tests/fixtures.rs): the combined
-/// heat and the picked cells, from the goal layers alone.
-fn rebuild(layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>, Vec<usize>) {
-    let cells = layers[0].heat.values.len();
-    let searched = |i: usize| layers.iter().any(|l| l.heat.values[i].is_some());
-    let dropped = |i: usize| {
-        layers.iter().any(|l| l.heat.values[i].is_none() || l.gate.contains(&(i as u32)) || (l.must && l.heat.values[i].unwrap_or(0.0) <= 0.0))
-    };
+/// The browser's rule: an exact copy of `rebuild` in crates/contracts/tests/fixtures.rs (the
+/// reference, docs/contracts.md#goal-layers-and-stages). Keep the two the same.
+fn rebuild(searched: &HeatGrid, layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>, Vec<usize>) {
+    let cells = searched.values.len();
+    let dropped = |i: usize| layers.iter().any(|l| l.gate.contains(&(i as u32)) || (l.must && l.heat.values[i].unwrap_or(0.0) <= 0.0));
     let mut ranked: Vec<(&GoalLayer, f64)> = layers.iter().filter(|l| l.weight > 0.0).map(|l| (l, l.weight)).collect();
     if ranked.is_empty() {
         ranked = layers.iter().map(|l| (l, 1.0 / layers.len() as f64)).collect();
     }
     let raw: Vec<Option<f64>> = (0..cells)
-        .map(|i| searched(i).then(|| if dropped(i) { 0.0 } else { ranked.iter().map(|(l, w)| w * f64::from(l.heat.values[i].unwrap())).sum() }))
+        .map(|i| {
+            searched.values[i]?;
+            Some(if dropped(i) { 0.0 } else { ranked.iter().map(|(l, w)| w * f64::from(l.heat.values[i].unwrap())).sum() })
+        })
         .collect();
     let best = raw.iter().flatten().fold(0.0, |a: f64, &b| a.max(b));
     let heat = raw.iter().map(|v| v.map(|r| if best > 0.0 { r / best } else { 0.0 })).collect();
@@ -158,7 +158,7 @@ fn rebuilds(out: &SearchOutput, layers: &[GoalLayer], n: usize, name: &str) {
     }
     assert!(out.stages.windows(2).all(|w| w[0].n >= w[1].n), "{name}: the funnel only narrows");
     assert_eq!(out.stages[1].n, out.searched, "{name}");
-    let (heat, picked) = rebuild(layers, out.spacing_m, n);
+    let (heat, picked) = rebuild(&out.heat, layers, out.spacing_m, n);
     for (i, (mine, theirs)) in heat.iter().zip(&out.heat.values).enumerate() {
         assert_eq!(mine.is_some(), theirs.is_some(), "{name}: cell {i}");
         if let (Some(a), Some(b)) = (mine, theirs) {
