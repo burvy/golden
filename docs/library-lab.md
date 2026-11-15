@@ -1,5 +1,17 @@
 # Library lab: cheap gates that cut candidates without losing the best spots
 
+## Headline numbers
+
+- **15 cost functions measured and kept**, all 15 in the search today.
+- **Recall kept: 100%.** Every one keeps all of the search's top 10 spots in every test: 18 places in
+  downtown LA and Princeton, 3 days (Nov 14, Jun 21, Dec 21), up to 100 runs with spots per entry.
+- **They skip half the work or more.** 11 of them have a cheap check that drops a median 41-93% of
+  candidate standpoints before the skyline trace (3 more get theirs with task 065).
+  Example: "the sun sets beside the tower" traces 55,248 -> 21,888 skylines; search 1219 -> 549 ms.
+- **Shots covered, sunset and sunrise:** sun alone (open horizon, wide gap, down the street, keyhole),
+  one tower (sun beside or behind it, golden light on it, looking up at it), two towers (sun between
+  them, the skyline glowing).
+
 Task 062. The goal is a growing library of cost functions that drop candidates cheaply, before the
 skyline trace, without losing the spots an ungated search ranks best. Recall is the guardrail and
 prune % is the win. Each kept entry is one solved class of shot (docs/metrics.md v2).
@@ -433,46 +445,77 @@ The lab now runs places in parallel (about 12 minutes for everything), and the t
 
 ## What we learned (round 5)
 
-Round 5 (Gogi) added seven shot classes and seven entries, all kept on round 4's setup (18 places, 3
-days). Each new scenario is built from its entry's own score with the `must` left out (`shot()` in the
-lab), so the entry standing in for it has exactly the same score and recall is exact. Over the seven shot
-classes, skyline traces fall from 156,774 to 29,619 (81% fewer).
+Round 5 added shots with two buildings in one frame, and re-ran everything at a 500 m radius to check
+the entries hold on bigger areas. The 500 m run printed only; the table above is for 300 m.
 
-| entry | shot class (scenario) | tested runs (places) | prune median (min-max) | skyline traces | search time |
-|---|---|---|---|---|---|
-| `sunburst_up` | `sunburst`: street level, the tower looms 20+ deg, the evening sun at its edge | 16 (7) | 96% (68-100%) | 13617 -> 1128 | 290 -> 59 ms |
-| `lined_up_toward_sunset` | `stacked-sunset`: a building stacked in front of the tower, the sun right behind the stack | 10 (6) | 95% (19-100%) | 28887 -> 2949 | 741 -> 121 ms |
-| `sunburst_up_sunrise` | `sunburst-sunrise` | 21 (9) | 93% (20-100%) | 13617 -> 2298 | 309 -> 82 ms |
-| `lined_up_toward_sunrise` | `stacked-sunrise` | 9 (5) | 93% (29-100%) | 28887 -> 4614 | 777 -> 173 ms |
-| `in_front_toward_sunset` | `foreground-sunset`: a building in front of the tower, the sun setting behind the tower | 25 (10) | 87% (12-100%) | 28887 -> 6813 | 740 -> 204 ms |
-| `skyline_at_sunset` | `skyline-sunset`: on a roof, the tower as skyline with the sun beside it, as one goal | 24 (9) | 85% (12-100%) | 13992 -> 4011 | 377 -> 138 ms |
-| `in_front_toward_sunrise` | `foreground-sunrise` | 24 (11) | 79% (15-100%) | 28887 -> 7806 | 790 -> 257 ms |
+1. **Skyline glow, a new shot class: the low sun lights both towers in one frame.** "The skyline glows
+   at sunset" is a classic city shot. It's rare at these places: spots in 19 of 54 runs at sunset and
+   25 of 54 at sunrise. The two towers have to stand together on the side away from the sun.
+   - `skyline_glow`: 100% recall in 16 tested runs on 8 places, 57% pruned, traces 26181 -> 10044.
+   - `skyline_glow_at_sunrise`: 100% recall in 22 tested runs on 9 places, 80% pruned, traces
+     26181 -> 7773.
+   - Their must is the lit-tower cone on both buildings, plus "in one frame".
+2. **`both_in_frame` (two towers in the shot) is weak: 18%.** It's like `towers_over`. The plain brief's
+   must already runs on line of sight (Ray tier), before the skyline (a median of 26 traces). So the
+   entry's cheap `in_frame` must only saves marches. It's kept in library/ as a building block, not for
+   SEEDS.
+3. **Everything holds at 500 m.** With a 500 m area every entry keeps 100% recall in every run (18
+   places, 3 days). "The tower" is then the tallest building within 500 m, often a different building,
+   which tests the entries again.
+   - Prune moves with where that tower stands: `sunset_beside` 54% (68% at 300 m),
+     `sunrise_beside` 82% (51%), `sunset_between_two` 81%, `skyline_glow` 89%.
+   - `tower_lit_at_sunrise` drops to 24% there. It's still exact, only less of a speed-up.
+   - The 6-deg ray precheck kept every spot at 500 m, including `sunrise-clear` (450 tested runs). The
+     300 m loss at Mercer West still stands, so the advice in round 3 doesn't change.
 
-1. **The pattern: the sun's year-round cone and-ed with the shot's cheap geometry.** Each must is the cone
-   (sunset 180-330 deg, sunrise 30-180 deg) plus the Point-tier parts the score needs anyway: over 20 deg
-   tall (sunburst), bearings within 10 deg and a nearer (stacked), one frame and a under 0.8 of b's
-   distance (foreground), 2-20 deg tall (skyline). The cone alone gives about 68-76%; the geometry takes
-   it to 85-96%.
-2. **`skyline_at_sunset` replaces the weak `skyline_view` (14%).** The size range alone barely cuts (round
-   2, point 3); putting the sun relation and its cone in the same entry makes it 85%.
-3. **Foreground and stacked shots need a `kind` reference.** With the second-tallest building fixed as the
-   foreground, the must dropped 100% at Pershing: the two towers never line up. "Any building within 400 m
-   of the tower" (`building_then_tower` in the lab) finds the shot in 9-25 of 54 runs.
-4. **Tried and dropped:**
-   - `sunset_telephoto` (the sun within 5 deg of a building 0.7-1.5 km away, long lens): its must prunes
-     0%. A far object has nearly the same bearing from the whole area, so the cone passes all or nothing.
-     Only the day's sun track (064) can gate it.
-   - `between_toward_sunset` (the tower framed between two buildings, the sun beside it). **A core quirk,
-     for burvy:** with two `kind` references in one goal (`left` and `right`, both "any building near the
-     tower"), the plain score keeps 0 candidates at Nassau Hall while the same score with the entry's Point
-     must keeps 7 and picks 5 spots; the must on its own also keeps 0. So multi-`kind` goals score
-     differently with and without a must (probably which of the 64 choices gets evaluated). One `kind` plus
-     one `id` (foreground, stacked) is consistent. Worth a look before the agent writes "between two
-     buildings" briefs.
-5. **Saturation.** With today's features, the tower-and-sun relations are now covered for both events:
-   beside, behind, between two, in front, stacked, lit, sunburst and skyline. What's left either mirrors
-   these (a sunrise skyline) or needs something core doesn't have: the day's sun track (064), sun seen low
-   (065), hoisting Point conjuncts (066), water objects, or the multi-`kind` fix above.
+## What we learned (round 6)
+
+Shot-class tuning: how wide can "behind the tower" and "the sun behind you" be before the shot stops
+being the shot? These are sweeps of the brief, not gates.
+
+1. **Why silhouette is rare: distance.** `sun_behind` wants the sun to hide 1.5-6 deg up (and gives up
+   by 15 deg). For the sun to hide behind *the tower* in that window, you have to stand roughly 10-40x
+   the tower's height away: 1.2-5 km for Pershing's 126 m tower, 3-12 km for Bunker Hill's 311 m one. A
+   300 m area round the tower is far too close, so the sun hides behind the tower too high up, or
+   behind a nearer building first. Where the tower stands at the west edge of the area, almost no
+   standpoint has it toward the sunset at all: the direction cone keeps 3 of 745 candidates at
+   Convention Center, 13 of 297 at Witherspoon and 17 of 230 at Mercer West. Those three never find a
+   silhouette, even at 20 deg. **For the agent:** to silhouette a named tower, search an area 1-5 km
+   east of it, not round it.
+2. **Widening "behind the tower" from 5 to 10 deg finds a spot in 5 more runs (32 -> 37 of 54). 20 deg
+   finds one in 6 more (43).** At Pershing and Civic Center the sun drops behind a building right next
+   to the tower. The `sunset_behind` must (the tower toward the sunset, +-15 deg) still holds at 10
+   deg: 100% recall in 37 tested runs, 76% pruned. 20 deg is outside the cone's margin, so the must
+   isn't valid there. Suggest leaving `sunset_behind` at 5 deg (a true silhouette of the tower) and
+   letting the agent loosen it in a brief when 5 finds nothing.
+3. **Lit tower: 30 deg is the right width.** At 20 deg the brief finds spots in 44 of 54 runs, against
+   49 of 54 at 30 deg. It isn't any more "lit" in a way the features can tell, so `tower_lit_at_*` stay at 30.
+
+## What we learned (round 7)
+
+Two sun-only street shots. They need no objects, so they work in any area today.
+
+1. **`sun_down_the_street`, a sun-only street shot.** The shot: at street level,
+   the sun sets or rises down a street, into a 1.5-20 deg gap between the buildings on both sides, and
+   stays in view to within 2 deg of the horizon (the "-henge" shot). Its must is "not on a roof", which
+   is Point tier. So it drops street-level-impossible points before any trace, with no 065 needed:
+   - 100% recall in 48 tested runs on 15 places (sunset and sunrise, 3 days).
+   - A median 50% pruned (28-65%), skyline traces 55248 -> 27282, search 1283 -> 626 ms.
+   - **Correction (task 067):** that saving is only what "street level" already gives. Its must, "not
+     on a roof", is part of the shot, not implied by its score, and the scenario wrote "street" into
+     the goal, so the 100% recall comes for free. A brief that just asks for street level (standing
+     `ground`) skips the roofs before any trace anyway: 235 candidates in ~505 ms, the same as with
+     the must. Against its score alone it loses top spots (that's the roofs it rules out on purpose).
+     So it counts as a shot, not a speed gate. The other entries pass that stricter test (`--try`,
+     task 067): `sunset_beside`, `sunset_behind`, `sunset_between_two`, `tower_lit_at_sunset`,
+     `skyline_glow` and `towers_over` keep 100%.
+   - Stacked with 065's 6-deg precheck (provably safe, since the score is 0 once the sun hides 6 deg
+     up), the precheck alone would drop 78%.
+   - It's rarer than it sounds: spots in 21 of 54 runs at sunset and 27 of 54 at sunrise (11 places),
+     the same runs where `street-between` finds any.
+2. **`sun_keyhole`: the sun through a 1.5-3 deg slot.** It's a tighter, more dramatic `sun_between`. It
+   finds spots in 40 of 54 runs on 16 places, roof or street. It has no cheap must today. With 065 at
+   6 deg (provably safe) it would prune 79%, at 100% recall in 40 tested runs.
 
 ## Promote list (for SEEDS)
 
@@ -491,30 +534,28 @@ averaged over all its runs, with and without it.
 
 | rank | entry | brief it serves (lab scenarios) | works today? | tested runs (places) | prune median (min-max) | skyline traces | search time |
 |---|---|---|---|---|---|---|---|
-| 1 | `open_horizon` | "an open view, the sun right down to the horizon", sunset or sunrise (`open-view`, `sunrise-open-view`) | **yes**, sun only | 95 of 108 (18) | none today (its must reads the skyline); 97% (66-100%) with 065 at 1 deg | 55248 -> 3144 with 065 | 1186 -> ~117 ms with 065 |
-| 2 | `sun_wide_gap` | "the sun framed by the skyline, with room around it" (`wide-gap`, `sunrise-wide-gap`) | **yes**, sun only | 91 of 108 (18) | none today; 78% (38-97%) with 065 at 6 deg | 55248 -> 15341 with 065 | 1130 -> ~431 ms with 065 |
-| 3 | `sunset_behind` | "silhouette: the sun drops behind the tower" (`silhouette`, `silhouette-tower2`) | yes, needs a building object | 67 of 108 (17) | 68% (6-100%) | 55248 -> 21888 | 1210 -> 523 ms |
-| 4 | `sunset_beside` | "the sun sets beside the tower" (`sun-by-tower`, `sun-by-tower2`) | yes, needs a building object | 94 of 108 (18) | 68% (6-100%) | 55248 -> 21888 | 1219 -> 549 ms |
-| 5 | `sunset_between_two` | "the sun sets between two towers" (`between-towers`) | yes, needs a building object | 39 of 51 (14) | 76% (7-100%) | 26181 -> 8403 | 1229 -> 491 ms |
-| 6 | `tower_lit_at_sunset` | "golden light on the tower" (`lit-tower`, `lit-tower2`) | yes, needs a building object | 100 of 108 (18) | 41% (1-97%) | 55248 -> 29253 | 1192 -> 682 ms |
-| 7 | `sunrise_between_two` | "the sun rises between two towers" (`sunrise-between-towers`) | yes, needs a building object | 38 of 51 (15) | 63% (7-100%) | 26181 -> 10950 | 1102 -> 537 ms |
-| 8 | `tower_lit_at_sunrise` | "morning light on the tower" (`sunrise-lit-tower`) | yes, needs a building object | 42 of 54 (16) | 61% (6-99%) | 27624 -> 13305 | 1096 -> 585 ms |
-| 9 | `sunrise_beside` | "the sun rises beside the tower" (`sunrise-by-tower`) | yes, needs a building object | 50 of 54 (18) | 51% (6-96%) | 27624 -> 11772 | 1147 -> 527 ms |
-| 10 | `sunrise_behind` | "dawn silhouette behind the tower" (`sunrise-silhouette`) | yes, needs a building object | 33 of 54 (14) | 51% (6-96%) | 27624 -> 11772 | 1111 -> 514 ms |
-| 11 | `towers_over` | "low angle, looking up at the tower" (`looking-up`) | yes, needs a building object | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
-| 12 | `in_front_toward_sunset` | "a building in the foreground, the sun setting behind the tower" (`foreground-sunset`) | yes, needs a building object | 25 of 54 (10) | 87% (12-100%) | 28887 -> 6813 | 740 -> 204 ms |
-| 13 | `skyline_at_sunset` | "the skyline from a roof, the sun setting by the tower" (`skyline-sunset`) | yes, needs a building object | 24 of 54 (9) | 85% (12-100%) | 13992 -> 4011 | 377 -> 138 ms |
-| 14 | `sunburst_up` | "sunburst at the edge of a tower, looking up" (`sunburst`) | yes, needs a building object | 16 of 54 (7) | 96% (68-100%) | 13617 -> 1128 | 290 -> 59 ms |
-| 15 | `in_front_toward_sunrise` | "a building in the foreground, the sun rising behind the tower" (`foreground-sunrise`) | yes, needs a building object | 24 of 54 (11) | 79% (15-100%) | 28887 -> 7806 | 790 -> 257 ms |
-| 16 | `sunburst_up_sunrise` | "morning sunburst at the edge of a tower" (`sunburst-sunrise`) | yes, needs a building object | 21 of 54 (9) | 93% (20-100%) | 13617 -> 2298 | 309 -> 82 ms |
-| 17 | `lined_up_toward_sunset` | "buildings stacked into the setting sun" (`stacked-sunset`) | yes, needs a building object | 10 of 54 (6) | 95% (19-100%) | 28887 -> 2949 | 741 -> 121 ms |
-| 18 | `lined_up_toward_sunrise` | "buildings stacked into the rising sun" (`stacked-sunrise`) | yes, needs a building object | 9 of 54 (5) | 93% (29-100%) | 28887 -> 4614 | 777 -> 173 ms |
+| 1 | `open_horizon` (seed since 070) | "an open view, the sun right down to the horizon", sunset or sunrise (`open-view`, `sunrise-open-view`) | **yes**, sun only | 95 of 108 (18) | none today (its must reads the skyline); 97% (66-100%) with 065 at 1 deg | 55248 -> 3144 with 065 | 1186 -> ~117 ms with 065 |
+| 2 | `sun_wide_gap` (seed since 070) | "the sun framed by the skyline, with room around it" (`wide-gap`, `sunrise-wide-gap`) | **yes**, sun only | 91 of 108 (18) | none today; 78% (38-97%) with 065 at 6 deg | 55248 -> 15341 with 065 | 1130 -> ~431 ms with 065 |
+| 3 | `sun_down_the_street` | "the sun setting (or rising) right down a street, buildings on both sides" (`down-the-street`, `sunrise-down-the-street`) | **yes**, sun only | 48 of 108 (15) | 50% vs a roof-or-street search, the same as asking for street level (see round 7, correction); 78% with 065 at 6 deg | 55248 -> 27282 | 1283 -> 626 ms |
+| 4 | `sun_keyhole` | "the sun through a narrow slot between buildings" (`keyhole`) | **yes**, sun only | 40 of 54 (16) | none today; 79% (38-97%) with 065 at 6 deg | 27624 -> 7520 with 065 | 1350 -> ~501 ms with 065 |
+| 5 | `sunset_behind` (seed since 070) | "silhouette: the sun drops behind the tower" (`silhouette`, `silhouette-tower2`) | yes, needs a building object | 67 of 108 (17) | 68% (6-100%) | 55248 -> 21888 | 1210 -> 523 ms |
+| 6 | `sunset_beside` (seed since 070) | "the sun sets beside the tower" (`sun-by-tower`, `sun-by-tower2`) | yes, needs a building object | 94 of 108 (18) | 68% (6-100%) | 55248 -> 21888 | 1219 -> 549 ms |
+| 7 | `sunset_between_two` (seed since 070) | "the sun sets between two towers" (`between-towers`) | yes, needs a building object | 39 of 51 (14) | 76% (7-100%) | 26181 -> 8403 | 1229 -> 491 ms |
+| 8 | `tower_lit_at_sunset` (seed since 070) | "golden light on the tower" (`lit-tower`, `lit-tower2`) | yes, needs a building object | 100 of 108 (18) | 41% (1-97%) | 55248 -> 29253 | 1192 -> 682 ms |
+| 9 | `sunrise_between_two` (seed since 070) | "the sun rises between two towers" (`sunrise-between-towers`) | yes, needs a building object | 38 of 51 (15) | 63% (7-100%) | 26181 -> 10950 | 1102 -> 537 ms |
+| 10 | `tower_lit_at_sunrise` (seed since 070) | "morning light on the tower" (`sunrise-lit-tower`) | yes, needs a building object | 42 of 54 (16) | 61% (6-99%) | 27624 -> 13305 | 1096 -> 585 ms |
+| 11 | `sunrise_beside` (seed since 070) | "the sun rises beside the tower" (`sunrise-by-tower`) | yes, needs a building object | 50 of 54 (18) | 51% (6-96%) | 27624 -> 11772 | 1147 -> 527 ms |
+| 12 | `sunrise_behind` (seed since 070) | "dawn silhouette behind the tower" (`sunrise-silhouette`) | yes, needs a building object | 33 of 54 (14) | 51% (6-96%) | 27624 -> 11772 | 1111 -> 514 ms |
+| 13 | `skyline_glow` | "the skyline glows: low sun on both towers" (`skyline-glow`) | yes, needs two building objects | 16 of 51 (8) | 57% (18-100%) | 26181 -> 10044 | 1176 -> 549 ms |
+| 14 | `skyline_glow_at_sunrise` | "morning glow on both towers" (`sunrise-skyline-glow`) | yes, needs two building objects | 22 of 51 (9) | 80% (17-100%) | 26181 -> 7773 | 1099 -> 443 ms |
+| 15 | `towers_over` (seed since 070) | "low angle, looking up at the tower" (`looking-up`) | yes, needs a building object | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
 
 (Rows 1 and 2: tested runs and prune are the 065 ray what-if on those scenarios. The `open-view`
 scenario writes the same must inline.)
 
 How it's ranked:
-1. The two sun-only entries come first, because they work in any area, objects or not.
+1. The sun-only entries come first, because they work in any area, objects or not. None has a cheap
+   speed gate today (`sun_down_the_street`'s must is "street level", part of the shot).
 2. Then the sunset object shots, by how common the brief is. "Beside" and "behind" are the hero
    shots.
 3. Then the sunrise mirrors.
