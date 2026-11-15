@@ -40,13 +40,13 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("could not bind {addr} (already running?): {e}"));
     let state = Arc::new(state::AppState::from_env());
-    println!("Claude: {}", if secrets::get("ANTHROPIC_API_KEY").is_some() { "key found" } else { "no key: the agent runs as the offline mock" });
+    println!("Claude: {}", if secrets::get("ANTHROPIC_API_KEY").is_some() { "key found" } else { "no key (ANTHROPIC_API_KEY / ANTHROPIC_ENV_FILE): the agent runs as the offline mock" });
     println!(
         "Vexcel heights: {}",
         if vexcel::auth::ApiKey::from_env().is_ok() {
             "key found"
         } else {
-            "no key: cache only (cached ~0.9 m tiles stand in for missing 6 cm ones); USGS LiDAR where nothing is cached"
+            "no key (VEXCEL_API_KEY / VEXCEL_ENV_FILE): cache only (cached ~0.9 m tiles stand in for missing 6 cm ones); USGS LiDAR where nothing is cached"
         }
     );
     println!("golden on http://{addr}  (web app at /, API under /api)");
