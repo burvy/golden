@@ -39,6 +39,11 @@ use index::Project;
 pub const INDEX_URL: &str = "https://usgs.entwine.io/boundaries/resources.geojson";
 /// Same limit as Vexcel: horizons need 1-3 km; more is "fetching a city".
 pub const MAX_RADIUS_M: f64 = 3000.0;
+/// Point-cloud tiles one height map may use (a 3 km square at the default spacing is well under this). Stops
+/// a dense survey from pulling hundreds of MB into memory.
+pub const MAX_NODES: usize = 2500;
+/// Hierarchy pages fetched per walk (each level of the octree is one round of pages).
+const MAX_PAGE_ROUNDS: usize = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -58,6 +63,8 @@ pub enum Error {
     Las(#[from] las::Error),
     #[error("bad data: {0}")]
     BadData(String),
+    #[error("not cached, and downloads are off (GOLDEN_OFFLINE=1): {0}")]
+    Offline(String),
 }
 
 #[derive(Debug, Clone)]
@@ -115,7 +122,12 @@ pub async fn get_dsm_with(lat: f64, lon: f64, radius_m: f64, opts: &DsmOptions) 
     // walk the hierarchy, fetching pages as the walk needs them
     let mut hier: HashMap<String, i64> = HashMap::new();
     let mut pages = vec![Key::ROOT];
+    let mut rounds = 0;
     let nodes = loop {
+        rounds += 1;
+        if rounds > MAX_PAGE_ROUNDS {
+            return Err(Error::BadData(format!("{}: hierarchy deeper than {MAX_PAGE_ROUNDS} levels", project.name)));
+        }
         for k in &pages {
             let name = k.name();
             let url = format!("{base}ept-hierarchy/{name}.json");
@@ -130,6 +142,9 @@ pub async fn get_dsm_with(lat: f64, lon: f64, radius_m: f64, opts: &DsmOptions) 
         pages = plan.pages;
     };
 
+    if nodes.len() > MAX_NODES {
+        return Err(Error::BadData(format!("{} point-cloud tiles needed, over the {MAX_NODES} limit: ask for a smaller radius", nodes.len())));
+    }
     let paths = download_nodes(&http, &base, &dir, &nodes, opts.max_concurrency).await?;
     let deepest = nodes.iter().map(|k| k.d).max().unwrap_or(0);
     let source = DsmSource {
