@@ -87,7 +87,10 @@ impl From<HeightsError> for ApiErr {
         match &e {
             HeightsError::NoData { lidar: lidar::Error::Offline(_), .. } => crate::guard::offline_err("no height map here"),
             HeightsError::NoData { .. } => ApiErr::unprocessable(format!("no height data here ({e})")),
-            HeightsError::Vexcel(vexcel::Error::NoKey) => ApiErr(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+            HeightsError::Vexcel(vexcel::Error::NoKey) => {
+                eprintln!("height map: {e}");
+                ApiErr(StatusCode::SERVICE_UNAVAILABLE, "no height map is cached here, and this server can't download one".into())
+            }
             HeightsError::Vexcel(vexcel::Error::TooLarge(_)) => ApiErr::bad(e.to_string()),
             HeightsError::Vexcel(_) => {
                 eprintln!("height map: {e}");

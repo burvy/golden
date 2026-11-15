@@ -166,7 +166,7 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
         log.add("buildings", match st.kit {
             Some(_) if near > 0 => format!("{roofs} roof spot(s); {found} on a CoStar building, {near} next to one (nearest within {NEARBY_BUILDING_M:.0} m)"),
             Some(_) => format!("{roofs} roof spot(s); {found} matched to a CoStar building"),
-            None => format!("{roofs} roof spot(s); CoStar kit not loaded, so no access contacts"),
+            None => format!("{roofs} roof spot(s); building contacts aren't available on the public demo"),
         });
     }
 
@@ -184,11 +184,15 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
                 model = g.model.clone();
                 log.add("write", format!("{} wrote the sheet; every time in it was checked against the tools", g.model));
             }
-            Err(why) => log.add("write", format!("Kept the templated wording: {why}")),
+            Err(why) => {
+                eprintln!("agent: kept the templated wording: {why}");
+                log.add("write", "Kept the built-in wording: Claude's version wasn't available or didn't pass the time check");
+            }
         }
     } else {
-        log.add("write", "Wrote the sheet from templates (no ANTHROPIC_API_KEY: offline mock)");
-        sheet.caveats.push("Written by the offline mock (no Claude key yet): the wording is templated; all numbers come from the tools.".into());
+        // User-facing: no env var names here (task 072); the server log says which key is missing.
+        log.add("write", "Wrote the sheet with the built-in templates");
+        sheet.caveats.push("Planned with the built-in reader: the wording is templated; all numbers come from the tools.".into());
     }
     lap("write", &mut split);
     eprintln!("agent: {}", split.iter().map(|(n, ms)| format!("{n} @{ms} ms")).collect::<Vec<_>>().join(", "));
@@ -202,14 +206,17 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
 async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: Option<&Claude>, log: &mut Log) -> Result<(Brief, Place), ApiErr> {
     let text = req.text.trim();
     let mut fields = Fields::read(text);
-    let mut by = "the offline reader";
+    let mut by = "the built-in reader";
     if let Some(g) = llm {
         match claude_read(g, text, now, req).await {
             Ok(v) => {
                 by = "Claude";
                 fields = fields.with_model(&v);
             }
-            Err(e) => log.add("read", format!("Claude couldn't read the brief ({e}); using the offline reader")),
+            Err(e) => {
+                eprintln!("agent: Claude couldn't read the brief: {e}");
+                log.add("read", "Claude couldn't read the brief; using the built-in reader");
+            }
         }
     }
     let (brief, place) = settle(st, text, &fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, log).await?;
@@ -407,16 +414,25 @@ async fn search_with_replan(st: &AppState, mut brief: Brief, place: &str, log: &
         if !r.spots.is_empty() {
             return Ok((r, notes));
         }
-        if attempt == 0 && (brief.framing != Framing::Clear || brief.standing != Standing::Any) {
-            let msg = format!("Nothing fits \"{}\" {}; relaxing to any open view", framing_words(brief.framing), standing_words(brief.standing));
+        let asked = format!("\"{}\" {}", framing_words(brief.framing), standing_words(brief.standing));
+        // The first retry relaxes what it can. A shot the user asked for (sun_wide_gap, open_horizon, ...) stays
+        // strict and so does the framing that names it; when nothing else can relax, the area widens instead,
+        // and the note says so rather than claiming a relax that didn't happen.
+        let sun = attempt == 0 && relax_sun_goal(&mut brief.goals, brief.framing);
+        let standing = attempt == 0 && brief.standing != Standing::Any;
+        if sun || standing {
+            let to = if sun { "any open view" } else { "either standing, keeping the asked-for shot" };
+            let msg = format!("Nothing fits {asked}; relaxing to {to}");
             log.add("plan", msg.clone());
             notes.push(msg);
-            relax_sun_goal(&mut brief.goals, brief.framing);
-            brief.framing = Framing::Clear;
+            if sun {
+                brief.framing = Framing::Clear;
+            }
             brief.standing = Standing::Any;
         } else {
             let wider = (brief.area.radius_m * 1.6).min(contracts::search::MAX_BRIEF_RADIUS_M);
-            let msg = format!("Still nothing; widening the area from {:.0} m to {wider:.0} m", brief.area.radius_m);
+            let lead = if attempt == 0 { format!("Nothing fits {asked}; keeping the asked-for shot and") } else { "Still nothing;".into() };
+            let msg = format!("{lead} widening the area from {:.0} m to {wider:.0} m", brief.area.radius_m);
             log.add("plan", msg.clone());
             notes.push(msg);
             brief.area.radius_m = wider;
@@ -428,11 +444,18 @@ async fn search_with_replan(st: &AppState, mut brief: Brief, place: &str, log: &
 /// Pure: relaxing the framing to clear also relaxes the sun goal, but only when goals[0] is exactly the
 /// framing's own `sun_<framing>` (what the chat sets): a goal the user or the agent chose (open_horizon, a weight,
 /// a must, an inline function) is theirs and stays. Without this, a chat brief's relax step changed nothing.
-fn relax_sun_goal(goals: &mut [contracts::Goal], old: Framing) {
-    if let Some(g) = goals.first_mut() {
-        if *g == contracts::Goal::using(golden_core::library::sun_goal_name(old)) {
+/// Returns whether the sun goal relaxes: swapped here, or no goals at all (the implicit goal follows the framing).
+fn relax_sun_goal(goals: &mut [contracts::Goal], old: Framing) -> bool {
+    if old == Framing::Clear {
+        return false;
+    }
+    match goals.first_mut() {
+        None => true,
+        Some(g) if *g == contracts::Goal::using(golden_core::library::sun_goal_name(old)) => {
             *g = contracts::Goal::using(golden_core::library::sun_goal_name(Framing::Clear));
+            true
         }
+        Some(_) => false,
     }
 }
 
@@ -636,7 +659,7 @@ fn assemble(
     }
     if spots.iter().any(|s| s.spot.standing == Standing::Roof) {
         match costar {
-            Costar::NoKit => caveats.push("CoStar kit isn't loaded on this server, so roof spots have no access contacts yet".into()),
+            Costar::NoKit => caveats.push("Building contacts aren't available on the public demo: ask the building's front desk or manager for roof access".into()),
             Costar::NotHere => caveats.push(
                 "CoStar's building data covers Los Angeles and Houston, not this area, so there are no access contacts: ask the building's front desk or manager".into(),
             ),
@@ -785,12 +808,12 @@ mod tests {
         use contracts::Goal;
         let names = |g: &[Goal]| g.iter().map(|x| x.name().to_string()).collect::<Vec<_>>();
         let mut chat = vec![Goal::using("sun_between"), Goal::using("in_front")];
-        relax_sun_goal(&mut chat, Framing::Between);
+        assert!(relax_sun_goal(&mut chat, Framing::Between));
         assert_eq!(names(&chat), ["sun_clear", "in_front"]);
         assert_eq!(chat[1], Goal::using("in_front"), "later goals untouched");
 
         let mut behind = vec![Goal::using("sun_behind")];
-        relax_sun_goal(&mut behind, Framing::Behind);
+        assert!(relax_sun_goal(&mut behind, Framing::Behind));
         assert_eq!(behind, [Goal::using("sun_clear")]);
 
         // Not the framing's own goal: a lab shot, another framing's goal, a weighted or must goal, no goals.
@@ -800,12 +823,14 @@ mod tests {
         weighted.weight = Some(0.5);
         for g in [Goal::using("sun_wide_gap"), Goal::using("sun_behind"), must, weighted] {
             let mut goals = vec![g.clone()];
-            relax_sun_goal(&mut goals, Framing::Between);
+            assert!(!relax_sun_goal(&mut goals, Framing::Between));
             assert_eq!(goals, [g]);
         }
         let mut none: Vec<Goal> = Vec::new();
-        relax_sun_goal(&mut none, Framing::Between);
+        assert!(relax_sun_goal(&mut none, Framing::Between), "the implicit goal follows the framing");
         assert!(none.is_empty());
+        let mut clear = vec![Goal::using("sun_clear")];
+        assert!(!relax_sun_goal(&mut clear, Framing::Clear), "already clear: nothing to relax");
     }
 
     #[test]
@@ -911,7 +936,7 @@ mod tests {
         // the offline reader's reading of the words: sunset, street, between
         assert_eq!((brief.event, brief.standing, brief.framing), (Event::Sunset, Standing::Ground, Framing::Between));
         assert!(log.0.iter().any(|s| s.summary.starts_with("Claude couldn't read the brief")));
-        assert!(log.0.last().unwrap().summary.ends_with("(by the offline reader)"));
+        assert!(log.0.last().unwrap().summary.ends_with("(by the built-in reader)"));
     }
 
     #[tokio::test]
@@ -969,7 +994,8 @@ mod tests {
             assert!(tools.contains(&t), "no {t} step in {tools:?}");
         }
         assert!(!tools.contains(&"plan"), "nothing to re-plan: {tools:?}");
-        assert!(sheet.caveats.iter().any(|c| c.contains("offline mock")));
+        assert!(sheet.caveats.iter().any(|c| c.contains("built-in reader")));
+        assert!(sheet.caveats.iter().chain(sheet.steps.iter().map(|s| &s.summary)).all(|c| !c.contains("_KEY") && !c.contains("mock")), "no dev words for the public");
         // Synthetic heights are not Vexcel, so no photo was fetched.
         assert!(sheet.spots.iter().all(|s| s.photo_url.is_none()));
         // the search rides along, for the map and re-weighting
@@ -977,6 +1003,32 @@ mod tests {
         assert_eq!(search.layers.len(), 1, "the implicit sun goal");
         assert_eq!(search.spots[0].id, sheet.spots[0].spot.id);
         assert_eq!(search.brief, sheet.brief);
+    }
+
+    #[tokio::test]
+    async fn an_asked_for_shot_stays_strict_and_the_note_says_the_area_widens() {
+        // Flat ground has no gap to frame, so a wide-gap brief finds nothing at any radius.
+        let st = crate::testkit::state(crate::testkit::city());
+        let mut brief = run_with(&st, agent_req("sunset, clear view, roof or street"), now(), None).await.unwrap().brief;
+        brief.goals = vec![contracts::Goal::using("sun_wide_gap")];
+        brief.framing = Framing::Between;
+        brief.standing = Standing::Any;
+        let flat = crate::testkit::state(crate::testkit::grid(&[]));
+
+        let plans = |log: &Log| log.0.iter().filter(|s| s.tool == "plan").map(|s| s.summary.clone()).collect::<Vec<_>>();
+        let mut log = Log::default();
+        assert!(search_with_replan(&flat, brief.clone(), "here", &mut log).await.is_err());
+        let p = plans(&log);
+        assert!(p[0].contains("keeping the asked-for shot and widening the area"), "{p:?}");
+        assert!(p.iter().all(|m| !m.contains("relaxing")), "nothing relaxed: {p:?}");
+
+        // From a roof: the standing relaxes, the shot doesn't.
+        brief.standing = Standing::Roof;
+        let mut log = Log::default();
+        assert!(search_with_replan(&flat, brief, "here", &mut log).await.is_err());
+        let p = plans(&log);
+        assert!(p[0].contains("relaxing to either standing, keeping the asked-for shot"), "{p:?}");
+        assert!(!p[0].contains("any open view"), "{p:?}");
     }
 
     #[tokio::test]
