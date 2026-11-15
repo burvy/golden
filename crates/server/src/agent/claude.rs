@@ -30,7 +30,12 @@ pub struct Claude {
 }
 
 impl Claude {
+    /// `None` (the offline reader runs instead) without a key, with `GOLDEN_CLAUDE=off`, or once today's
+    /// `GOLDEN_CLAUDE_DAILY_MAX` is spent (`guard.rs`).
     pub fn from_env(http: &reqwest::Client) -> Option<Claude> {
+        if !crate::guard::get().claude_allowed() {
+            return None;
+        }
         let key = secrets::get("ANTHROPIC_API_KEY")?;
         let model = secrets::get("GOLDEN_CLAUDE_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string());
         let base_url = secrets::get("ANTHROPIC_BASE_URL").unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
@@ -43,6 +48,7 @@ impl Claude {
 
     /// One prompt in, one JSON object out (matching `schema`, a JSON Schema with `additionalProperties: false`).
     pub async fn json(&self, prompt: &str, schema: Value) -> Result<Value, String> {
+        crate::guard::get().claude_take()?;
         let mut req = self
             .http
             .post(format!("{}/v1/messages", self.base_url))
@@ -60,6 +66,56 @@ impl Claude {
         eprintln!("{}", timing_line(&v, t0.elapsed()));
         answer_json(status, &v)
     }
+
+    /// One turn of the agent's tool loop (`tools.rs`): the conversation so far in, Claude's whole message out
+    /// (thinking, text and `tool_use` blocks, to be appended to the conversation unchanged). HTTP errors are `Err`.
+    pub async fn tool_turn(&self, system: &str, messages: &[Value], tools: &Value) -> Result<Value, String> {
+        crate::guard::get().claude_take()?;
+        let mut req = self
+            .http
+            .post(format!("{}/v1/messages", self.base_url))
+            .timeout(TOOL_TIMEOUT)
+            .header("x-api-key", &self.key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&tool_body(&self.model, system, messages, tools));
+        if uses_fallbacks(&self.model) {
+            req = req.header("anthropic-beta", FALLBACK_BETA);
+        }
+        let t0 = std::time::Instant::now();
+        let resp = req.send().await.map_err(|e| format!("Claude request failed: {}", e.without_url()))?;
+        let status = resp.status().as_u16();
+        let v: Value = resp.json().await.map_err(|e| format!("Claude answer unreadable: {}", e.without_url()))?;
+        eprintln!("{}", timing_line(&v, t0.elapsed()));
+        if !(200..300).contains(&status) {
+            let msg = v["error"]["message"].as_str().unwrap_or("unknown error");
+            return Err(format!("Claude HTTP {status}: {}", msg.chars().take(200).collect::<String>()));
+        }
+        Ok(v)
+    }
+}
+
+/// Writing and testing cost functions takes some thought; the loop's turns stay short.
+const TOOL_EFFORT: &str = "medium";
+const TOOL_MAX_TOKENS: u32 = 16000;
+const TOOL_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Pure: a tool-loop request. `tool_choice` auto (forced choice is a 400 on current models); the tools and
+/// system prompt don't change between turns, so the top-level `cache_control` caches them.
+pub fn tool_body(model: &str, system: &str, messages: &[Value], tools: &Value) -> Value {
+    let mut body = json!({
+        "model": model,
+        "max_tokens": TOOL_MAX_TOKENS,
+        "system": system,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": {"type": "auto"},
+        "output_config": {"effort": TOOL_EFFORT},
+        "cache_control": {"type": "ephemeral"}
+    });
+    if uses_fallbacks(model) {
+        body["fallbacks"] = json!("default");
+    }
+    body
 }
 
 /// Pure: one stderr line per call (model, wall time, tokens) so latency can be measured; no content, no key.

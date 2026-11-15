@@ -13,6 +13,11 @@ pub fn default_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("cache"))
 }
 
+/// Cache-only mode (`GOLDEN_OFFLINE` = 1/true/yes/on, same switch as the server and `vexcel`): nothing downloads.
+pub fn offline() -> bool {
+    std::env::var("GOLDEN_OFFLINE").is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+}
+
 pub fn http() -> Result<reqwest::Client, Error> {
     Ok(reqwest::Client::builder()
         .user_agent("golden-hackathon/0.1")
@@ -24,6 +29,9 @@ pub fn http() -> Result<reqwest::Client, Error> {
 pub async fn cached(http: &reqwest::Client, url: &str, path: &Path) -> Result<Vec<u8>, Error> {
     if let Ok(b) = tokio::fs::read(path).await {
         return Ok(b);
+    }
+    if offline() {
+        return Err(Error::Offline(url.to_string()));
     }
     let bytes = get(http, url).await?;
     write(path, &bytes).await?;

@@ -20,6 +20,19 @@ pub const SHARED_ENV_FILE_VAR: &str = "GOLDEN_ENV_FILE";
 /// The Vexcel key, and the variable naming its own key file.
 pub const VEXCEL_KEY: &str = "VEXCEL_API_KEY";
 pub const VEXCEL_KEY_FILE_VAR: &str = "VEXCEL_ENV_FILE";
+/// Set to `1` for cache-only mode: `ApiKey::from_env` then always says `NoKey`, so every Vexcel call in the
+/// workspace (heights, photos, tiles, mesh, detection) serves what is cached and never downloads.
+pub const OFFLINE_VAR: &str = "GOLDEN_OFFLINE";
+
+/// Is cache-only mode on (`GOLDEN_OFFLINE` = 1/true/yes/on)?
+pub fn offline() -> bool {
+    std::env::var(OFFLINE_VAR).is_ok_and(|v| is_on(&v))
+}
+
+/// Pure: does an env value switch something on?
+pub fn is_on(v: &str) -> bool {
+    matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
 
 #[derive(Clone)]
 pub struct ApiKey(String);
@@ -40,7 +53,11 @@ impl ApiKey {
     }
 
     /// `VEXCEL_API_KEY`, else the file in `VEXCEL_ENV_FILE` (bare token or `.env`), else the shared `.env`.
+    /// Always `NoKey` in cache-only mode (`GOLDEN_OFFLINE=1`).
     pub fn from_env() -> Result<ApiKey, Error> {
+        if offline() {
+            return Err(Error::NoKey);
+        }
         lookup(VEXCEL_KEY, Some(VEXCEL_KEY_FILE_VAR)).map(ApiKey).ok_or(Error::NoKey)
     }
 }
