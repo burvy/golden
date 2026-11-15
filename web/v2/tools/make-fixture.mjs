@@ -7,8 +7,8 @@
 //   heat = raw / max raw; spots = best raw first, ties to the lower cell, at least spacing_m apart.
 // Usage: node web/v2/tools/make-fixture.mjs <out.json>
 import { writeFileSync } from 'node:fs';
-import { evaluate } from '../js/expr.js';
-import { featFor, LIBRARY, OBJECTS, CENTER } from '../js/mock.js';
+import { evaluate } from './expr.js';
+import { featFor, LIBRARY, OBJECTS, CENTER } from './mock.js';
 
 const EARTH_R = 6378137, RADIUS = 400, CELL = 20, SIDE = 40, MIN_SPACING = 40, MAX_SPOTS = 10;
 const rad = d => d * Math.PI / 180, r5 = x => Math.round(x * 1e5) / 1e5, r3 = x => Math.round(x * 1e3) / 1e3;
