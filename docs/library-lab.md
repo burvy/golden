@@ -476,7 +476,7 @@ classes, skyline traces fall from 156,774 to 29,619 (81% fewer).
 
 ## Promote list (for SEEDS)
 
-All 11 are in core's SEEDS since task 070 (each `about` names its brief). The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
+Ranks 1-11 are in core's SEEDS since task 070; ranks 12-18 (round 5) are not seeded yet (each `about` names its brief). The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
 
 Ranked for the demo. **Update (round 4): Ray's 053 (object sources) has merged**, so the server now
 passes objects to the search: CoStar buildings in LA, and Vexcel detections where it detects. Object
