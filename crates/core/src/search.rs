@@ -1079,7 +1079,7 @@ mod tests {
         });
         let at = |id: &str, kind: &str, north: f64, top: f64, r: f64| {
             let (lat, lon) = objects::offset((LAT, LON), 0.0, north);
-            Object { id: id.into(), kind: kind.into(), lat, lon, base_m: 0.0, top_m: top, radius_m: r, source: "test".into() }
+            Object { id: id.into(), kind: kind.into(), lat, lon, base_m: 0.0, top_m: top, radius_m: r, source: "test".into(), name: None }
         };
         (g, vec![at("costar:1", "building", 200.0, 60.0, 15.0), at("vexcel:fountain:1", "fountain", 100.0, 5.0, 3.0)])
     }
@@ -1162,7 +1162,7 @@ mod tests {
         objs.push(Object { id: "vexcel:fountain:2".into(), lat, lon, ..objs[1].clone() });
         let run = |goals: &str| {
             let mut b = with_goals(brief(100.0, Standing::Ground, Framing::Clear), goals);
-            b.area = Area { lat, lon, radius_m: 100.0 };
+            b.area = Area { lat, lon, radius_m: 100.0, name: None };
             search_with(&g, &b, &Inputs { library: &crate::library::seeds(), objects: &objs }, PDT).unwrap()
         };
         let out = run(r#"[{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"id":"costar:1"}}}]"#);
@@ -1203,7 +1203,7 @@ mod tests {
     fn runnable_checks_the_library_and_the_objects() {
         let (_, objs) = plaza(false);
         let lib = crate::library::seeds();
-        let area = Area { lat: LAT, lon: LON, radius_m: 300.0 };
+        let area = Area { lat: LAT, lon: LON, radius_m: 300.0, name: None };
         let goal = |s: &str| -> Goal { serde_json::from_str(s).unwrap() };
         let none: [Object; 0] = [];
         let with = |objects| Inputs { library: &lib, objects };
