@@ -92,7 +92,8 @@ grid from ~700 MB to ~56 MB.
 - **Agent** (`POST /api/agent`): read the brief (Claude if `ANTHROPIC_API_KEY`, else a rule reader) -> search (re-plans:
   relaxes framing/standing, widens the area) -> sun path -> Vexcel oblique for the primary -> CoStar contacts -> write the
   sheet (Claude, with every time checked against the tools, else templates). `steps` lists what it did.
-- **Web** (`web/index.html`): the brief goes to the agent; spots, call sheet, skyline panorama, 3D view (scene ring 1,
+- **Web** (`web/index.html`, code in `web/v2/`): chat-led goals as live filters. The server's goal layers re-weight in the browser (task 057); `/v2/` redirects here.
+- **Classic web** (`web/classic/index.html`, the first page): the brief goes to the agent; spots, call sheet, skyline panorama, 3D view (scene ring 1,
   4 m cells, ~1 km), Vexcel aerial photo and CoStar contacts all come from the server. The map draws Vexcel tiles,
   Esri World Imagery where Vexcel has none. Each pane still falls back to sample data if its endpoint fails.
   The intro hero builds its 3D city from `/api/scene` at the user's location (OpenStreetMap/Overpass removed).

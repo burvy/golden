@@ -1,4 +1,4 @@
-// task 057 phase 2 interaction test (Playwright + Edge). usage: node web/v2/tools/int-test.mjs <http://host/v2/index.html> <outdir>
+// task 057 phase 2 interaction test (Playwright + Edge). usage: node web/v2/tools/int-test.mjs <http://host/> <outdir>
 // fixture: weights/must/remove re-rank in the browser, top-10, a new spot shows "no sun times yet".
 // live: drag the map -> "Search this area" -> a new search centred on the view; zoom buttons; wheel.
 import { chromium } from 'playwright-core';
