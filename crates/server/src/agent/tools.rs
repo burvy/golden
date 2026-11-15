@@ -22,7 +22,7 @@ use golden_core::search::skyline_need_m;
 use serde_json::{json, Value};
 
 use super::claude::Claude;
-use super::library::{valid_name, Library, Origin};
+use super::library::{valid_name, Library};
 use super::trial::{trial, Trial};
 use super::{facing, search_with_replan, Log};
 use crate::api::{self, PhotoReq};
@@ -456,6 +456,7 @@ pub fn tool_defs() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::library::Origin;
     use crate::testkit;
     use axum::routing::post;
     use axum::Router;
