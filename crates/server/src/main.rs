@@ -9,6 +9,7 @@
 //!   GET  /api/photo (+ .jpg)     PhotoMeta: Vexcel oblique looking toward the sun
 //!   GET  /api/buildings[/{id}]   CoStar buildings (empty without the kit)
 //!   POST /api/agent              CallSheet: typed brief in, call sheet out (Claude, or the offline mock)
+//!   POST /api/chat               ChatReply: the brief as a chat (asks up to 3 questions, then searches)
 //!   GET  /api/tiles/vexcel/...   Vexcel map tiles (proxy + cache), 204 where none
 //!   GET  /proto/map              map prototype
 //!
