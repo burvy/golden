@@ -11,6 +11,7 @@ name = "golden_core"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 contracts = { path = "../contracts" }
+serde_json = "1"
 
 [dev-dependencies]
 # Only for examples/search_la.rs (real LA heights). Core itself stays IO-free.
