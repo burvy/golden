@@ -1,7 +1,8 @@
 //! Library lab: which cheap gates cut candidates before the expensive work, without losing the
 //! spots an ungated search ranks best? (task 062, docs/library-lab.md)
 //!
-//! `cargo run -p golden-core --release --example library_lab -- [--write] [--place NAME] [--scenario KEY] [--gate NAME]`
+//! `cargo run -p golden-core --release --example library_lab -- [--write | --report] [--place NAME] [--scenario KEY] [--gate NAME] [--radius M]`
+//! (`LAB_THREADS=N`: places run N at a time, default 6; `--report` rebuilds the doc from the last `--write`.)
 //!
 //! For every place (real height maps, cache only) and day (Nov 14, Jun 21), each scenario (a brief's
 //! goals) runs once ungated, then once per gate with the gate added as a `must`. A must goal has
@@ -30,7 +31,6 @@
 //! `cache/library_lab/rows.json`.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
@@ -80,7 +80,8 @@ const PLACES: &[Place] = &[
 ];
 
 /// (date, UTC offset in LA, UTC offset in Princeton). The offset only changes printed times.
-const DAYS: [(&str, i32, i32); 2] = [("2026-11-14", -8 * 3600, -5 * 3600), ("2026-06-21", -7 * 3600, -4 * 3600)];
+/// Round 4 added Dec 21, the winter extreme of the sun track (Jun 21 is the summer one).
+const DAYS: [(&str, i32, i32); 3] = [("2026-11-14", -8 * 3600, -5 * 3600), ("2026-06-21", -7 * 3600, -4 * 3600), ("2026-12-21", -8 * 3600, -5 * 3600)];
 
 /// What a scenario's goals and gates can refer to at one place and day.
 struct Ctx {
@@ -98,10 +99,12 @@ struct Scenario {
     standing: Standing,
     event: Event,
     goals: fn(&Ctx) -> String,
+    /// Run on the second tower instead: "the tower" (and every entry's first param) is the next tallest.
+    second: bool,
 }
 
 fn scenarios() -> Vec<Scenario> {
-    let plain = |key, about, standing, goals: fn(&Ctx) -> String| Scenario { key, about, standing, event: Event::Sunset, goals };
+    let plain = |key, about, standing, goals: fn(&Ctx) -> String| Scenario { key, about, standing, event: Event::Sunset, goals, second: false };
     vec![
         plain("clear", "sun in view down to the horizon, roof or street", Standing::Any, |_| r#"[{"use":"sun_clear"}]"#.into()),
         plain("between", "sun sets into a gap between buildings, roof or street", Standing::Any, |_| r#"[{"use":"sun_between"}]"#.into()),
@@ -221,10 +224,37 @@ fn scenarios() -> Vec<Scenario> {
         sunrise(plain("sunrise-open-view", "the library's open_horizon at sunrise: in view from within 1 deg of the horizon (a must), ranked on clear sky (sun only)", Standing::Any, |_| {
             r#"[{"use":"open_horizon","must":true,"weight":1}]"#.into()
         })),
+        // ---- round 4: the same entries on another building, and the sun seeds at sunrise ----
+        second(plain("sun-by-tower2", "as sun-by-tower, on the second tallest building", Standing::Any, |c| {
+            format!(
+                r#"[{{"def":{{"name":"sun_by_tower","about":"Sun sets within 15 deg of the tower",
+                    "score":{{"op":"bump","x":{{"f":"sun_bearing_diff","obj":{t}}},"at":0,"width":15}}}},"must":true,"weight":1}},
+                    {{"use":"sun_clear","weight":0.5}}]"#,
+                t = c.tower
+            )
+        })),
+        second(plain("silhouette-tower2", "as silhouette, on the second tallest building", Standing::Any, |c| {
+            format!(
+                r#"[{{"def":{{"name":"sun_behind_tower","about":"Sun drops behind the tower",
+                    "score":{{"op":"mul","of":[{{"op":"bump","x":{{"f":"sun_bearing_diff","obj":{t}}},"at":0,"width":5}},{{"f":"sun_behind"}}]}}}},"must":true,"weight":1}}]"#,
+                t = c.tower
+            )
+        })),
+        second(plain("lit-tower2", "as lit-tower, on the second tallest building", Standing::Any, lit_tower)),
+        sunrise(plain("sunrise-between", "the sun rises out of a gap between buildings, roof or street (sun only)", Standing::Any, |_| r#"[{"use":"sun_between"}]"#.into())),
+        sunrise(plain("sunrise-behind", "the sun comes up from behind a building, roof or street (sun only)", Standing::Any, |_| r#"[{"use":"sun_behind"}]"#.into())),
+        sunrise(plain("sunrise-wide-gap", "the library's sun_wide_gap at sunrise (a must; sun only)", Standing::Any, |_| {
+            r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
+        })),
         plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         }),
     ]
+}
+
+/// The same scenario on the second tower.
+fn second(s: Scenario) -> Scenario {
+    Scenario { second: true, ..s }
 }
 
 /// The same scenario at sunrise.
@@ -268,7 +298,7 @@ struct Gate {
     name: String,
     kind: GateKind,
     /// The goal to add, as JSON (a `must`).
-    goal: Box<dyn Fn(&Ctx, &[CostFn]) -> String>,
+    goal: Box<dyn Fn(&Ctx, &[CostFn]) -> String + Send + Sync>,
     /// Scenario keys it is tried on.
     on: Vec<&'static str>,
     /// `Some(i)`: the gate replaces the scenario's goal `i` (a shot-class entry whose own cheap `must`
@@ -306,7 +336,7 @@ fn entry(name: &'static str, on: &[&'static str]) -> Gate {
 }
 
 /// An inline gate: `def(ctx)` is the cost function's JSON.
-fn inline(name: String, kind: GateKind, on: &[&'static str], def: impl Fn(&Ctx) -> String + 'static) -> Gate {
+fn inline(name: String, kind: GateKind, on: &[&'static str], def: impl Fn(&Ctx) -> String + Send + Sync + 'static) -> Gate {
     Gate { name, kind, goal: Box::new(move |c, _| format!(r#"{{"def":{},"must":true}}"#, def(c))), on: on.to_vec(), replaces: None, class: 'a' }
 }
 
@@ -357,18 +387,18 @@ fn gates() -> Vec<Gate> {
         entry("tower_toward_sunset", &["sun-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline"]),
         entry("tower_toward_sunrise", &["sunrise-by-tower", "sunrise-silhouette"]),
         entry("tower_framed_toward_sunset", &["tower-framing-sunset"]),
-        Gate { replaces: Some(0), ..entry("sunset_beside", &["sun-by-tower"]) },
+        Gate { replaces: Some(0), ..entry("sunset_beside", &["sun-by-tower", "sun-by-tower2"]) },
         Gate { replaces: Some(0), ..entry("sunrise_beside", &["sunrise-by-tower"]) },
         Gate { replaces: Some(1), ..entry("tower_fills", &["tower-and-sunset"]) },
         // round 2: shot-class entries whose own must is the speed gate
-        Gate { replaces: Some(0), ..entry("sunset_behind", &["silhouette"]) },
+        Gate { replaces: Some(0), ..entry("sunset_behind", &["silhouette", "silhouette-tower2"]) },
         Gate { replaces: Some(0), ..entry("sunset_between_two", &["between-towers"]) },
         Gate { replaces: Some(0), ..entry("towers_over", &["looking-up"]) },
         Gate { replaces: Some(0), ..entry("skyline_view", &["rooftop-skyline"]) },
         // round 3: sunrise mirrors and the low sun on the tower
         Gate { replaces: Some(0), ..entry("sunrise_behind", &["sunrise-silhouette"]) },
         Gate { replaces: Some(0), ..entry("sunrise_between_two", &["sunrise-between-towers"]) },
-        Gate { replaces: Some(0), ..entry("tower_lit_at_sunset", &["lit-tower"]) },
+        Gate { replaces: Some(0), ..entry("tower_lit_at_sunset", &["lit-tower", "lit-tower2"]) },
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunrise", &["sunrise-lit-tower"]) },
         // why framing gates prune so little: the two halves of the size range, and the line of sight
         tower_test("tower_over_2_deg", r#"{"op":"gt","x":{"f":"size_deg","obj":TOWER},"than":{"num":2}}"#),
@@ -458,11 +488,13 @@ fn skyline_rays(t: &SunTrack) -> usize {
     (((hi + side) - (lo - side)) / SKY_STEP_DEG).ceil() as usize + 1
 }
 
-/// Rays marched by the ray what-ifs (to report rays per candidate).
-static RAYS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Rays marched by the ray what-ifs on this thread (to report rays per candidate).
+    static RAYS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 fn ray(grid: &DsmGrid, eye: Eye, az: f64, top: f64) -> f64 {
-    RAYS.fetch_add(1, Ordering::Relaxed);
+    RAYS.with(|r| r.set(r.get() + 1));
     ray_max_below(grid, eye, az, SKYLINE_RADIUS_M, top).elev_deg
 }
 
@@ -504,7 +536,7 @@ fn seen_below(g: &DsmGrid, e: Eye, t: &SunTrack, top: f64, top_deg: f64) -> bool
 }
 
 const RAY_GATES: &[RayGate] = &[
-    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view", "sunrise-clear", "sunrise-open-view", "wide-gap"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
+    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view", "sunrise-clear", "sunrise-open-view", "wide-gap", "sunrise-between", "sunrise-wide-gap"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
     // open-view's must is `sun_hidden_elev < 1`: this is that test, exactly, before any skyline
     RayGate { name: "ray_sun_seen_below_1", on: &["open-view", "sunrise-open-view"], pass: |g, e, t, top| seen_below(g, e, t, top, 1.0) },
     RayGate { name: "ray_sun_seen_below_3", on: &["clear", "between", "street-between"], pass: |g, e, t, top| seen_below(g, e, t, top, 3.0) },
@@ -540,7 +572,7 @@ fn heat_candidates(grid: &DsmGrid, out: &SearchOutput) -> Vec<(f64, f64, f64)> {
 
 // ---- one measurement ------------------------------------------------------------------
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Row {
     place: String,
     city: String,
@@ -570,6 +602,7 @@ struct Row {
 }
 
 /// One ungated scenario run: is the shot class sane here (does it find spots), and what does it cost?
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Shot {
     place: String,
     scenario: String,
@@ -839,6 +872,227 @@ fn arg(args: &[String], name: &str) -> Option<String> {
     args.get(i + 1).cloned()
 }
 
+/// What one place's measurements produced: its printed log, rows, shots and its line for the report.
+struct PlaceOut {
+    log: String,
+    rows: Vec<Row>,
+    shots: Vec<Shot>,
+    label: Option<String>,
+}
+
+/// What every place shares: the library, CoStar, the scenarios and gates, and the command-line filters.
+struct Shared<'a> {
+    library: &'a [CostFn],
+    kit: Option<&'a costar::Kit>,
+    scenes: &'a [Scenario],
+    gates: &'a [Gate],
+    only_scenario: Option<&'a str>,
+    only_gate: Option<&'a str>,
+    radius_m: f64,
+}
+
+type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// Every scenario and gate at one place, both days. Runs on its own thread (searches are single-threaded).
+fn measure_place(place: &Place, grid: &DsmGrid, took: Duration, sh: &Shared) -> Res<PlaceOut> {
+    use std::fmt::Write as _;
+    let Shared { library, kit, scenes, gates, only_scenario, only_gate, radius_m } = *sh;
+    let library = library.to_vec();
+    let (mut log, mut rows, mut shots) = (String::new(), Vec::new(), Vec::new());
+    let reach = radius_m + golden_core::objects::OBJECT_REACH_M;
+    let mut objects = kit.as_ref().map(|k| costar_buildings(k, &grid, place.lat, place.lon, reach)).unwrap_or_default();
+    // CoStar only where it has a real set of buildings, including one inside the area to be the tower.
+    let source = if objects.len() >= 20 && tower_of(&objects, place.lat, place.lon, radius_m, None).is_some() { "costar" } else { "dsm" };
+    if source == "dsm" {
+        objects = dsm_buildings(&grid, place.lat, place.lon, reach);
+    }
+    let Some(tower) = tower_of(&objects, place.lat, place.lon, radius_m, None).cloned() else {
+        let _ = writeln!(log, "== {}: no building objects, skipped", place.name);
+        return Ok(PlaceOut { log, rows, shots, label: None });
+    };
+    let tower2 = tower_of(&objects, place.lat, place.lon, radius_m, Some((&tower, TOWER2_APART_M))).cloned().unwrap_or_else(|| tower.clone());
+    let _ = writeln!(log, 
+        "== {} ({}): grid {}x{} ({:.1?}), {} buildings from {source}, tower {} ({:.0} m tall), second {} ({:.0} m)",
+        place.name,
+        place.city,
+        grid.meta.width,
+        grid.meta.height,
+        took,
+        objects.len(),
+        tower.id,
+        tower.top_m - tower.base_m,
+        tower2.id,
+        tower2.top_m - tower2.base_m
+    );
+    let label = Some(format!("{} ({}, buildings from {source})", place.name, place.city));
+    let inputs = Inputs { library: &library, objects: &objects };
+    let top_m = grid_top(&grid);
+
+    for (date, la_off, pr_off) in DAYS {
+        let offset_s = if place.city == "LA" { la_off } else { pr_off };
+        let day = NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|e| e.to_string())?;
+        let at = At { place, radius_m, date, offset_s };
+
+        for scene in scenes.iter().filter(|s| only_scenario.as_deref().map_or(true, |k| k == s.key)) {
+            let track = sun_track(place.lat, place.lon, day, scene.event).ok_or("no sun track")?;
+            let azs = track.samples.iter().map(|s| s.az_deg);
+            let track_az = azs.fold((f64::MAX, f64::MIN), |(lo, hi), a| (lo.min(a), hi.max(a)));
+            let id = |o: &Object| format!(r#"{{"id":"{}"}}"#, o.id);
+            let (a, b) = if scene.second { (&tower2, &tower) } else { (&tower, &tower2) };
+                let ctx = Ctx { tower: id(a), tower2: id(b), track_az };
+            let base_goals = parse_goals(&(scene.goals)(&ctx))?;
+            let base = match run(&grid, &at, (scene.standing, scene.event), base_goals.clone(), K, &inputs) {
+                Ok(r) => r,
+                Err(e) => {
+                    let _ = writeln!(log, "  {date} {}: {e}", scene.key);
+                    continue;
+                }
+            };
+            let top = ids(&base.out);
+            let base_sky = skyline_goals(&base_goals, &library);
+            shots.push(Shot {
+                place: place.name.into(),
+                scenario: scene.key.into(),
+                searched: base.out.searched as usize,
+                traces: traces(&base.out, &base_sky),
+                spots: top.len(),
+                ms: base.took.as_secs_f64() * 1e3,
+            });
+            let base_heat = &base.out.heat.values;
+            let near: Vec<usize> = (0..base_heat.len()).filter(|&i| base_heat[i].is_some_and(|v| v >= NEAR_BEST)).collect();
+            let _ = writeln!(log, 
+                "  {date} {:<16} ungated: {} searched, {} spots, {:.0} ms",
+                scene.key,
+                base.out.searched,
+                top.len(),
+                base.took.as_secs_f64() * 1e3
+            );
+            for gate in gates.iter().filter(|g| g.on.contains(&scene.key) && only_gate.as_deref().map_or(true, |n| n == g.name)) {
+                let gate_goal: Goal = serde_json::from_str(&(gate.goal)(&ctx, &library)).map_err(|e| format!("gate {}: {e}", gate.name))?;
+                let goals: Vec<Goal> = match gate.replaces {
+                    // same weight and must as the goal it stands in for, so only the entry's own must differs
+                    Some(i) => base_goals
+                        .iter()
+                        .enumerate()
+                        .map(|(j, g)| if j == i { Goal { cost: gate_goal.cost.clone(), ..g.clone() } } else { g.clone() })
+                        .collect(),
+                    None => base_goals.iter().cloned().chain([gate_goal.clone()]).collect(),
+                };
+                let prune_goal = match gate.replaces {
+                    Some(_) => must_alone(&gate.name, &ctx, &library)?,
+                    None => gate_goal,
+                };
+                let gated = match run(&grid, &at, (scene.standing, scene.event), goals.clone(), K, &inputs) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = writeln!(log, "    {:<22} error: {e}", gate.name);
+                        continue;
+                    }
+                };
+                let alone = run(&grid, &at, (scene.standing, scene.event), vec![prune_goal], 1, &inputs)?;
+                let cells: Vec<&Option<f32>> = alone.out.heat.values.iter().filter(|v| v.is_some()).collect();
+                let searched = cells.len();
+                let kept = cells.iter().filter(|v| v.is_some_and(|x| x > 0.0)).count();
+                let gated_ids = ids(&gated.out);
+                if std::env::var("LAB_DEBUG").is_ok() {
+                    print_spots(&[("ungated", &base.out), ("gated", &gated.out)]);
+                }
+                let found = top.iter().filter(|id| gated_ids.contains(id)).count();
+                let near_kept = near.iter().filter(|&&i| gated.out.heat.values[i].is_some_and(|v| v > 0.0)).count();
+                let traces_base = traces(&base.out, &base_sky);
+                let traces_gated = match gate.replaces {
+                    // the entry's own Point must runs before its Skyline score, inside one stage
+                    Some(i) if base_sky.iter().any(|n| n == base_goals[i].name()) => traces_base.saturating_sub(searched - kept),
+                    _ => traces(&gated.out, &skyline_goals(&goals, &library)),
+                };
+                let row = Row {
+                    place: place.name.into(),
+                    city: place.city.into(),
+                    date: date.into(),
+                    scenario: scene.key.into(),
+                    gate: gate.name.clone(),
+                    kind: gate.kind.name().into(),
+                    class: gate.class,
+                    traces_base,
+                    traces_gated,
+                    gated_spots: gated.out.spots.len(),
+                    rays: 0.0,
+                    sky_rays: skyline_rays(&track),
+                    searched,
+                    kept,
+                    prune: if searched > 0 { 1.0 - kept as f64 / searched as f64 } else { 0.0 },
+                    recall: if top.is_empty() { 1.0 } else { found as f64 / top.len() as f64 },
+                    near_best: (near_kept, near.len()),
+                    top: top.len(),
+                    t_base_ms: base.took.as_secs_f64() * 1e3,
+                    t_gated_ms: gated.took.as_secs_f64() * 1e3,
+                };
+                let _ = writeln!(log, 
+                    "    {:<22} prune {:>3.0}%  recall@10 {:>3.0}%  near-best {}/{}  {:.0} -> {:.0} ms",
+                    gate.name,
+                    row.prune * 100.0,
+                    row.recall * 100.0,
+                    near_kept,
+                    near.len(),
+                    row.t_base_ms,
+                    row.t_gated_ms
+                );
+                rows.push(row);
+            }
+            let ray_gates = RAY_GATES.iter().filter(|g| g.on.contains(&scene.key) && only_gate.as_deref().map_or(true, |n| n == g.name));
+            for gate in ray_gates {
+                let cands = heat_candidates(&grid, &base.out);
+                RAYS.with(|r| r.set(0));
+                let t = Instant::now();
+                let kept = cands.iter().filter(|&&(la, lo, e)| (gate.pass)(&grid, eye_at(&grid, la, lo, e), &track, top_m)).count();
+                let gate_ms = t.elapsed().as_secs_f64() * 1e3;
+                let rays = RAYS.with(|r| r.get());
+                // spots are rounded to 1e-5 deg; test the candidate each one came from
+                let at = |s: &contracts::Spot| {
+                    let d = |c: &&(f64, f64, f64)| costar::distance_m(s.lat, s.lon, c.0, c.1);
+                    cands.iter().min_by(|a, b| d(a).total_cmp(&d(b))).copied().unwrap_or((s.lat, s.lon, s.eye_m))
+                };
+                let passed = base.out.spots.iter().map(at).filter(|&(la, lo, e)| (gate.pass)(&grid, eye_at(&grid, la, lo, e), &track, top_m)).count();
+                let searched = cands.len();
+                let prune = if searched > 0 { 1.0 - kept as f64 / searched as f64 } else { 0.0 };
+                let t_base_ms = base.took.as_secs_f64() * 1e3;
+                let row = Row {
+                    place: place.name.into(),
+                    city: place.city.into(),
+                    date: date.into(),
+                    scenario: scene.key.into(),
+                    gate: gate.name.into(),
+                    kind: GateKind::WhatIfRay.name().into(),
+                    class: 'a',
+                    traces_base: traces(&base.out, &base_sky),
+                    traces_gated: traces(&base.out, &base_sky).saturating_sub(searched - kept),
+                    gated_spots: top.len(),
+                    rays: rays as f64 / searched.max(1) as f64,
+                    sky_rays: skyline_rays(&track),
+                    searched,
+                    kept,
+                    prune,
+                    recall: if top.is_empty() { 1.0 } else { passed as f64 / top.len() as f64 },
+                    near_best: (0, 0),
+                    top: top.len(),
+                    t_base_ms,
+                    // estimate: the skyline work scales with the candidates left, plus the rays
+                    t_gated_ms: t_base_ms * (1.0 - prune) + gate_ms,
+                };
+                let _ = writeln!(log, 
+                    "    {:<22} prune {:>3.0}%  recall@10 {:>3.0}%  (ray what-if, {:.1} ms of rays)",
+                    gate.name,
+                    row.prune * 100.0,
+                    row.recall * 100.0,
+                    gate_ms
+                );
+                rows.push(row);
+            }
+        }
+    }
+    Ok(PlaceOut { log, rows, shots, label })
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -852,6 +1106,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let library = load_library()?;
+    if args.iter().any(|a| a == "--report") {
+        // rebuild the generated section from the last --write's saved rows, without searching
+        let dir = repo().join("cache").join("library_lab");
+        let read = |f: &str| std::fs::read_to_string(dir.join(f)).map_err(|e| format!("{f}: {e} (run with --write first)"));
+        let rows: Vec<Row> = serde_json::from_str(&read("rows.json")?)?;
+        let shots: Vec<Shot> = serde_json::from_str(&read("shots.json")?)?;
+        let places_run: Vec<String> = serde_json::from_str(&read("places.json")?)?;
+        let gates = gates();
+        let names: Vec<(String, GateKind)> =
+            gates.iter().map(|g| (g.name.clone(), g.kind)).chain(RAY_GATES.iter().map(|g| (g.name.to_string(), GateKind::WhatIfRay))).collect();
+        let report = report(&rows, &shots, &names, &scenarios(), &places_run, &library, RADIUS_M);
+        write_report(&report)?;
+        println!("rebuilt docs/library-lab.md from cache/library_lab");
+        return Ok(());
+    }
     let kit = match costar::Kit::from_env() {
         Ok(k) => Some(k),
         Err(e) => {
@@ -865,201 +1134,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut shots: Vec<Shot> = Vec::new();
     let mut places_run: Vec<String> = Vec::new();
 
-    for place in PLACES.iter().filter(|p| only_place.as_deref().map_or(true, |n| n == p.name)) {
-        let t = Instant::now();
-        let Some(grid) = cached_grid(place, radius_m).await? else {
-            println!("== {} ({}): height map not fully cached, skipped", place.name, place.city);
-            continue;
-        };
-        let reach = radius_m + golden_core::objects::OBJECT_REACH_M;
-        let mut objects = kit.as_ref().map(|k| costar_buildings(k, &grid, place.lat, place.lon, reach)).unwrap_or_default();
-        // CoStar only where it has a real set of buildings, including one inside the area to be the tower.
-        let source = if objects.len() >= 20 && tower_of(&objects, place.lat, place.lon, radius_m, None).is_some() { "costar" } else { "dsm" };
-        if source == "dsm" {
-            objects = dsm_buildings(&grid, place.lat, place.lon, reach);
-        }
-        let Some(tower) = tower_of(&objects, place.lat, place.lon, radius_m, None).cloned() else {
-            println!("== {}: no building objects, skipped", place.name);
-            continue;
-        };
-        let tower2 = tower_of(&objects, place.lat, place.lon, radius_m, Some((&tower, TOWER2_APART_M))).cloned().unwrap_or_else(|| tower.clone());
-        println!(
-            "== {} ({}): grid {}x{} ({:.1?}), {} buildings from {source}, tower {} ({:.0} m tall), second {} ({:.0} m)",
-            place.name,
-            place.city,
-            grid.meta.width,
-            grid.meta.height,
-            t.elapsed(),
-            objects.len(),
-            tower.id,
-            tower.top_m - tower.base_m,
-            tower2.id,
-            tower2.top_m - tower2.base_m
-        );
-        places_run.push(format!("{} ({}, buildings from {source})", place.name, place.city));
-        let inputs = Inputs { library: &library, objects: &objects };
-        let top_m = grid_top(&grid);
-
-        for (date, la_off, pr_off) in DAYS {
-            let offset_s = if place.city == "LA" { la_off } else { pr_off };
-            let day = NaiveDate::parse_from_str(date, "%Y-%m-%d")?;
-            let at = At { place, radius_m, date, offset_s };
-
-            for scene in scenes.iter().filter(|s| only_scenario.as_deref().map_or(true, |k| k == s.key)) {
-                let track = sun_track(place.lat, place.lon, day, scene.event).ok_or("no sun track")?;
-                let azs = track.samples.iter().map(|s| s.az_deg);
-                let track_az = azs.fold((f64::MAX, f64::MIN), |(lo, hi), a| (lo.min(a), hi.max(a)));
-                let id = |o: &Object| format!(r#"{{"id":"{}"}}"#, o.id);
-                let ctx = Ctx { tower: id(&tower), tower2: id(&tower2), track_az };
-                let base_goals = parse_goals(&(scene.goals)(&ctx))?;
-                let base = match run(&grid, &at, (scene.standing, scene.event), base_goals.clone(), K, &inputs) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        println!("  {date} {}: {e}", scene.key);
-                        continue;
-                    }
-                };
-                let top = ids(&base.out);
-                let base_sky = skyline_goals(&base_goals, &library);
-                shots.push(Shot {
-                    place: place.name.into(),
-                    scenario: scene.key.into(),
-                    searched: base.out.searched as usize,
-                    traces: traces(&base.out, &base_sky),
-                    spots: top.len(),
-                    ms: base.took.as_secs_f64() * 1e3,
-                });
-                let base_heat = &base.out.heat.values;
-                let near: Vec<usize> = (0..base_heat.len()).filter(|&i| base_heat[i].is_some_and(|v| v >= NEAR_BEST)).collect();
-                println!(
-                    "  {date} {:<16} ungated: {} searched, {} spots, {:.0} ms",
-                    scene.key,
-                    base.out.searched,
-                    top.len(),
-                    base.took.as_secs_f64() * 1e3
-                );
-                for gate in gates.iter().filter(|g| g.on.contains(&scene.key) && only_gate.as_deref().map_or(true, |n| n == g.name)) {
-                    let gate_goal: Goal = serde_json::from_str(&(gate.goal)(&ctx, &library)).map_err(|e| format!("gate {}: {e}", gate.name))?;
-                    let goals: Vec<Goal> = match gate.replaces {
-                        // same weight and must as the goal it stands in for, so only the entry's own must differs
-                        Some(i) => base_goals
-                            .iter()
-                            .enumerate()
-                            .map(|(j, g)| if j == i { Goal { cost: gate_goal.cost.clone(), ..g.clone() } } else { g.clone() })
-                            .collect(),
-                        None => base_goals.iter().cloned().chain([gate_goal.clone()]).collect(),
-                    };
-                    let prune_goal = match gate.replaces {
-                        Some(_) => must_alone(&gate.name, &ctx, &library)?,
-                        None => gate_goal,
-                    };
-                    let gated = match run(&grid, &at, (scene.standing, scene.event), goals.clone(), K, &inputs) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            println!("    {:<22} error: {e}", gate.name);
-                            continue;
-                        }
-                    };
-                    let alone = run(&grid, &at, (scene.standing, scene.event), vec![prune_goal], 1, &inputs)?;
-                    let cells: Vec<&Option<f32>> = alone.out.heat.values.iter().filter(|v| v.is_some()).collect();
-                    let searched = cells.len();
-                    let kept = cells.iter().filter(|v| v.is_some_and(|x| x > 0.0)).count();
-                    let gated_ids = ids(&gated.out);
-                    if std::env::var("LAB_DEBUG").is_ok() {
-                        print_spots(&[("ungated", &base.out), ("gated", &gated.out)]);
-                    }
-                    let found = top.iter().filter(|id| gated_ids.contains(id)).count();
-                    let near_kept = near.iter().filter(|&&i| gated.out.heat.values[i].is_some_and(|v| v > 0.0)).count();
-                    let traces_base = traces(&base.out, &base_sky);
-                    let traces_gated = match gate.replaces {
-                        // the entry's own Point must runs before its Skyline score, inside one stage
-                        Some(i) if base_sky.iter().any(|n| n == base_goals[i].name()) => traces_base.saturating_sub(searched - kept),
-                        _ => traces(&gated.out, &skyline_goals(&goals, &library)),
-                    };
-                    let row = Row {
-                        place: place.name.into(),
-                        city: place.city.into(),
-                        date: date.into(),
-                        scenario: scene.key.into(),
-                        gate: gate.name.clone(),
-                        kind: gate.kind.name().into(),
-                        class: gate.class,
-                        traces_base,
-                        traces_gated,
-                        gated_spots: gated.out.spots.len(),
-                        rays: 0.0,
-                        sky_rays: skyline_rays(&track),
-                        searched,
-                        kept,
-                        prune: if searched > 0 { 1.0 - kept as f64 / searched as f64 } else { 0.0 },
-                        recall: if top.is_empty() { 1.0 } else { found as f64 / top.len() as f64 },
-                        near_best: (near_kept, near.len()),
-                        top: top.len(),
-                        t_base_ms: base.took.as_secs_f64() * 1e3,
-                        t_gated_ms: gated.took.as_secs_f64() * 1e3,
-                    };
-                    println!(
-                        "    {:<22} prune {:>3.0}%  recall@10 {:>3.0}%  near-best {}/{}  {:.0} -> {:.0} ms",
-                        gate.name,
-                        row.prune * 100.0,
-                        row.recall * 100.0,
-                        near_kept,
-                        near.len(),
-                        row.t_base_ms,
-                        row.t_gated_ms
-                    );
-                    rows.push(row);
-                }
-                let ray_gates = RAY_GATES.iter().filter(|g| g.on.contains(&scene.key) && only_gate.as_deref().map_or(true, |n| n == g.name));
-                for gate in ray_gates {
-                    let cands = heat_candidates(&grid, &base.out);
-                    RAYS.store(0, Ordering::Relaxed);
-                    let t = Instant::now();
-                    let kept = cands.iter().filter(|&&(la, lo, e)| (gate.pass)(&grid, eye_at(&grid, la, lo, e), &track, top_m)).count();
-                    let gate_ms = t.elapsed().as_secs_f64() * 1e3;
-                    let rays = RAYS.load(Ordering::Relaxed);
-                    // spots are rounded to 1e-5 deg; test the candidate each one came from
-                    let at = |s: &contracts::Spot| {
-                        let d = |c: &&(f64, f64, f64)| costar::distance_m(s.lat, s.lon, c.0, c.1);
-                        cands.iter().min_by(|a, b| d(a).total_cmp(&d(b))).copied().unwrap_or((s.lat, s.lon, s.eye_m))
-                    };
-                    let passed = base.out.spots.iter().map(at).filter(|&(la, lo, e)| (gate.pass)(&grid, eye_at(&grid, la, lo, e), &track, top_m)).count();
-                    let searched = cands.len();
-                    let prune = if searched > 0 { 1.0 - kept as f64 / searched as f64 } else { 0.0 };
-                    let t_base_ms = base.took.as_secs_f64() * 1e3;
-                    let row = Row {
-                        place: place.name.into(),
-                        city: place.city.into(),
-                        date: date.into(),
-                        scenario: scene.key.into(),
-                        gate: gate.name.into(),
-                        kind: GateKind::WhatIfRay.name().into(),
-                        class: 'a',
-                        traces_base: traces(&base.out, &base_sky),
-                        traces_gated: traces(&base.out, &base_sky).saturating_sub(searched - kept),
-                        gated_spots: top.len(),
-                        rays: rays as f64 / searched.max(1) as f64,
-                        sky_rays: skyline_rays(&track),
-                        searched,
-                        kept,
-                        prune,
-                        recall: if top.is_empty() { 1.0 } else { passed as f64 / top.len() as f64 },
-                        near_best: (0, 0),
-                        top: top.len(),
-                        t_base_ms,
-                        // estimate: the skyline work scales with the candidates left, plus the rays
-                        t_gated_ms: t_base_ms * (1.0 - prune) + gate_ms,
-                    };
-                    println!(
-                        "    {:<22} prune {:>3.0}%  recall@10 {:>3.0}%  (ray what-if, {:.1} ms of rays)",
-                        gate.name,
-                        row.prune * 100.0,
-                        row.recall * 100.0,
-                        gate_ms
-                    );
-                    rows.push(row);
-                }
+    let chosen: Vec<&Place> = PLACES.iter().filter(|p| only_place.as_deref().map_or(true, |n| n == p.name)).collect();
+    // places run in parallel (each search is single-threaded); LAB_THREADS=1 for clean timings
+    let threads: usize = std::env::var("LAB_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(6).max(1);
+    let shared = Shared {
+        library: &library,
+        kit: kit.as_ref(),
+        scenes: &scenes,
+        gates: &gates,
+        only_scenario: only_scenario.as_deref(),
+        only_gate: only_gate.as_deref(),
+        radius_m,
+    };
+    for batch in chosen.chunks(threads) {
+        let mut loaded = Vec::new();
+        for &place in batch {
+            let t = Instant::now();
+            match cached_grid(place, radius_m).await? {
+                Some(grid) => loaded.push((place, grid, t.elapsed())),
+                None => println!("== {} ({}): height map not fully cached, skipped", place.name, place.city),
             }
+        }
+        let outs: Vec<Res<PlaceOut>> = std::thread::scope(|s| {
+            let handles: Vec<_> = loaded.iter().map(|(place, grid, took)| s.spawn(|| measure_place(place, grid, *took, &shared))).collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("a place's thread panicked".into()))).collect()
+        });
+        for out in outs {
+            let out = out.map_err(|e| e.to_string())?;
+            print!("{}", out.log);
+            rows.extend(out.rows);
+            shots.extend(out.shots);
+            places_run.extend(out.label);
         }
     }
 
@@ -1072,7 +1177,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let dir = repo().join("cache").join("library_lab");
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join("rows.json"), serde_json::to_string_pretty(&rows)?)?;
-        println!("wrote docs/library-lab.md and cache/library_lab/rows.json");
+        std::fs::write(dir.join("shots.json"), serde_json::to_string_pretty(&shots)?)?;
+        std::fs::write(dir.join("places.json"), serde_json::to_string_pretty(&places_run)?)?;
+        println!("wrote docs/library-lab.md and cache/library_lab/{{rows,shots,places}}.json");
     }
     Ok(())
 }
@@ -1092,6 +1199,15 @@ fn median(mut v: Vec<f64>) -> f64 {
     }
 }
 
+/// Runs that tested recall (the ungated search found spots), and on how many places.
+fn tested(r: &[&Row]) -> (usize, usize) {
+    let t: Vec<&&Row> = r.iter().filter(|r| r.top > 0).collect();
+    let mut places: Vec<&str> = t.iter().map(|r| r.place.as_str()).collect();
+    places.sort();
+    places.dedup();
+    (t.len(), places.len())
+}
+
 fn pct(x: f64) -> String {
     format!("{:.0}%", x * 100.0)
 }
@@ -1102,7 +1218,8 @@ const CONTROL: &str = "soft-tower";
 /// The generated part of docs/library-lab.md: one summary row per (gate, scenario), then the verdict per gate.
 fn report(rows: &[Row], shots: &[Shot], gates: &[(String, GateKind)], scenes: &[Scenario], places: &[String], library: &[CostFn], radius_m: f64) -> String {
     let mut s = String::new();
-    s.push_str(&format!("Places: {}. Days: 2026-11-14, 2026-06-21. Area radius {radius_m} m, recall over the top {K}.\n\n", places.join(", ")));
+    let days: Vec<&str> = DAYS.iter().map(|d| d.0).collect();
+    s.push_str(&format!("Places: {}. Days: {}. Area radius {radius_m} m, recall over the top {K}.\n\n", places.join(", "), days.join(", ")));
     s.push_str("Scenarios (shot classes), ungated. Runs with at least one spot, then medians over the runs: candidates searched, skyline traces, spots picked, time.\n\n");
     s.push_str("| scenario | standing | event | what it asks | runs with a spot | candidates | skyline traces | spots | time |\n");
     s.push_str("|---|---|---|---|---|---|---|---|---|\n");
@@ -1131,8 +1248,8 @@ fn report(rows: &[Row], shots: &[Shot], gates: &[(String, GateKind)], scenes: &[
     }
     s.push_str("\nClass (a) = speed gate, judged by recall@10 and prune. Class (b) = shot class (changes the result on purpose), judged by prune and a sane result.\n");
     s.push_str("Skyline traces are summed over all runs of the row. Ray what-ifs: traces and time are estimates (the gate is evaluated in the lab, not in a search).\n\n");
-    s.push_str("| gate | class | kind | scenario | runs | places | prune median (min-max) | recall@10 min | near-best kept | skyline traces ungated -> gated | rays/cand (one trace) | time ungated -> gated |\n");
-    s.push_str("|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+    s.push_str("| gate | class | kind | scenario | runs | places | tested runs (places) | prune median (min-max) | recall@10 min | near-best kept | skyline traces ungated -> gated | rays/cand (one trace) | time ungated -> gated |\n");
+    s.push_str("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
     for (name, kind) in gates {
         for sc in scenes {
             let r: Vec<&Row> = rows.iter().filter(|r| &r.gate == name && r.scenario == sc.key).collect();
@@ -1154,10 +1271,11 @@ fn report(rows: &[Row], shots: &[Shot], gates: &[(String, GateKind)], scenes: &[
             } else {
                 "-".into()
             };
+            let (tested, tested_places) = tested(&r);
             let msb: f64 = r.iter().map(|r| r.t_base_ms).sum::<f64>() / r.len() as f64;
             let msg: f64 = r.iter().map(|r| r.t_gated_ms).sum::<f64>() / r.len() as f64;
             s.push_str(&format!(
-                "| `{name}` | ({}) | {} | {} | {} | {} | {} ({}-{}) | {} | {near} | {tb} -> {tg} | {rays} | {msb:.0} -> {msg:.0} ms |\n",
+                "| `{name}` | ({}) | {} | {} | {} | {} | {tested} ({tested_places}) | {} ({}-{}) | {} | {near} | {tb} -> {tg} | {rays} | {msb:.0} -> {msg:.0} ms |\n",
                 r[0].class,
                 kind.name(),
                 sc.key,
@@ -1189,12 +1307,12 @@ fn report(rows: &[Row], shots: &[Shot], gates: &[(String, GateKind)], scenes: &[
         } else if recall < 1.0 {
             let worst = r.iter().filter(|r| r.recall < 1.0).map(|r| format!("{} {} {} ({})", r.place, r.date, r.scenario, pct(r.recall))).collect::<Vec<_>>();
             format!("**drop**: loses top spots in {}", worst.join("; "))
-        } else if places.len() < 2 {
-            "not enough places".into()
+        } else if places.len() < 2 || tested(&r).1 < 2 {
+            format!("not enough places (recall tested in {} runs on {} places)", tested(&r).0, tested(&r).1)
         } else if prune < KEEP_PRUNE {
             format!("**weak**: full recall, but median prune only {}", pct(prune))
         } else {
-            format!("**keep**: full recall, median prune {}", pct(prune))
+            format!("**keep**: full recall (tested in {} runs on {} places), median prune {}", tested(&r).0, tested(&r).1, pct(prune))
         };
         let about = library.iter().find(|f| &f.name == name).map(|f| format!(" ({})", f.about)).unwrap_or_default();
         s.push_str(&format!("- `{name}` [{}]{about}: {verdict}\n", kind.name()));
