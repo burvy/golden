@@ -1,0 +1,103 @@
+{
+  "name": "lined_up_toward_sunrise",
+  "about": "a stacked in front of b with the sun rising right behind the stack (within 10 deg of b): same bearing (within 5 deg, best 0), a nearer, a in view, the top of b showing. Its must (bearings within 10 deg, a nearer, b at bearing 30-180 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'buildings stacked into the rising sun (lab: stacked-sunrise)'",
+  "params": [
+    "a",
+    "b"
+  ],
+  "must": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "op": "bump",
+          "x": {
+            "f": "bearing_diff",
+            "a": "a",
+            "b": "b"
+          },
+          "at": 0,
+          "width": 10
+        },
+        "than": {
+          "num": 0
+        }
+      },
+      {
+        "op": "lt",
+        "x": {
+          "f": "dist",
+          "obj": "a"
+        },
+        "than": {
+          "f": "dist",
+          "obj": "b"
+        }
+      },
+      {
+        "op": "gt",
+        "x": {
+          "op": "bump",
+          "x": {
+            "f": "bearing",
+            "obj": "b"
+          },
+          "at": 105,
+          "width": 75
+        },
+        "than": {
+          "num": 0
+        }
+      }
+    ]
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "bump",
+        "x": {
+          "f": "bearing_diff",
+          "a": "a",
+          "b": "b"
+        },
+        "at": 0,
+        "width": 5
+      },
+      {
+        "op": "lt",
+        "x": {
+          "f": "dist",
+          "obj": "a"
+        },
+        "than": {
+          "f": "dist",
+          "obj": "b"
+        }
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      },
+      {
+        "op": "ramp",
+        "x": {
+          "f": "visible",
+          "obj": "b"
+        },
+        "lo": 0,
+        "hi": 0.4
+      },
+      {
+        "op": "bump",
+        "x": {
+          "f": "sun_bearing_diff",
+          "obj": "b"
+        },
+        "at": 0,
+        "width": 10
+      }
+    ]
+  }
+}

@@ -96,3 +96,23 @@ LA and Houston, not this area") and the buildings step says so, instead of "roof
 Coverage wording updated in README (Limits), DESIGN (Where), and the vexcel/server comments.
 Live: Princeton default brief, 15 s, Vexcel heights + obliques, 3 roof spots, no contacts (as expected);
 downtown LA still gets its contacts.
+
+## 2026-11-15: library lab, round 5 (branch `core/library-sun-shots`)
+
+Grew the cost-function library (task 062, `docs/library-lab.md`) until new entries stopped adding anything.
+
+- Burvy's rounds 3 and 4 merged while I worked (PRs #44, #47). My first pass duplicated 4 of their entries
+  (`sunrise_behind`, `sunrise_between_two`, the two lit-tower ones), so I rebuilt on main with only the 7 new
+  ones, as round 5 on their 18 places x 3 days. The earlier attempts stay local (`gogi/library-lab-3-local`,
+  `gogi/library-lab-4-local`), not pushed.
+- **Cache:** fetched the far height-map tiles the 18 lab places need (~40 tiles, `cache/`, gitignored).
+- **7 new entries in `library/`, all kept** (100% recall in every run, tested on 5-11 places each, median
+  prune 79-96%): `in_front_toward_sunset`, `in_front_toward_sunrise`, `lined_up_toward_sunset`,
+  `lined_up_toward_sunrise`, `sunburst_up`, `sunburst_up_sunrise`, `skyline_at_sunset`. Skyline traces over
+  their shot classes: 156,774 -> 29,619. Added to the promote list (ranks 12-18).
+- **Lab:** 7 scenarios built from each entry's score without its must (`shot()`), so recall is exact; gates
+  can bind params to other objects (`entry_on`, e.g. "any building within 400 m of the tower").
+- **Dropped:** `sunset_telephoto` (prunes 0%: needs the day's sun track) and `between_toward_sunset` (a core
+  quirk with two `kind` refs in one goal; written up for burvy in the doc).
+- Mistake caught: `cargo fmt` reformatted all of core (the repo isn't rustfmt-clean). Reverted; the lab file
+  is edited by hand in its own style.

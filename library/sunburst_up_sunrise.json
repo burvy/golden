@@ -1,0 +1,64 @@
+{
+  "name": "sunburst_up_sunrise",
+  "about": "Morning sunburst looking up: a looms over you (20+ deg tall, best 30+) and in view, with the rising sun within 10 deg of it. Its must (a over 20 deg tall, at bearing 30-180 deg) drops points before any line-of-sight march or skyline, so use it as a must. For briefs like 'a morning sunburst at the edge of a tower, looking up (lab: sunburst-sunrise)'",
+  "params": [
+    "a"
+  ],
+  "must": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 20
+        }
+      },
+      {
+        "op": "gt",
+        "x": {
+          "op": "bump",
+          "x": {
+            "f": "bearing",
+            "obj": "a"
+          },
+          "at": 105,
+          "width": 75
+        },
+        "than": {
+          "num": 0
+        }
+      }
+    ]
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "ramp",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "lo": 20,
+        "hi": 30
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      },
+      {
+        "op": "bump",
+        "x": {
+          "f": "sun_bearing_diff",
+          "obj": "a"
+        },
+        "at": 0,
+        "width": 10
+      }
+    ]
+  }
+}
