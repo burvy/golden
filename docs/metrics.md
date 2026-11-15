@@ -1,6 +1,6 @@
 # Metrics: cutting down the points, one class of shot at a time
 
-Status: DRAFT for burvy (task 048). Nothing here is built yet.
+Status: approved by burvy (task 048); v2 section added after judges' feedback. Being built on branches.
 
 ## The idea in one paragraph
 
@@ -79,45 +79,98 @@ The sun is an object too: at a given time it has a bearing and an elevation. Tha
 behind the tower" and "sun between two towers" can later be written as relations. For now they
 stay as the Sun family.
 
-## Contract change (separate small PR, per AGENTS.md rule 2)
+## v2 (judges' feedback, 2026-11-14 ~22:00): the AI writes its own cost functions
 
+Two changes on top of the funnel above:
+1. **The brief box becomes a chat.** An agent asks short questions until it understands the shot
+   ("which tower?", "sunrise or sunset?", "street level OK?"), then hands search a set of goals.
+2. **The agent designs cost functions and keeps a library of them.** It doesn't write code. It
+   writes small **expressions** in a JSON language over a fixed set of pure **features** that core
+   computes. Core checks and runs them. Good ones get saved under a name and reused, so the library
+   grows into a list of solved shot classes. That's the "eliminate whole classes of points" idea,
+   made by the AI instead of by us.
+
+Why expressions and not generated code: they're safe (no code execution), fast (evaluated in Rust
+inside the funnel), checkable before use (unknown feature or wrong type = rejected with a reason the
+agent can fix), and each one is plain data we can show, save, diff and test.
+
+### Features (pure, computed in core per candidate, lazily, cached per candidate)
+Each feature has a **tier** (Point < Ray < Skyline). An expression's tier is the highest tier among
+its features, and the funnel runs cheap expressions first.
+
+| Feature | Tier | Meaning |
+|---|---|---|
+| `ground_m`, `eye_m`, `roof` (0/1) | Point | the standpoint |
+| `dist(obj)`, `bearing(obj)`, `bearing_diff(a, b)` | Point | geometry to objects (deg, m) |
+| `size_deg(obj)` | Point | angular height of an object |
+| `visible(obj)` | Ray | 0..1, ray march through the height map to base/mid/top |
+| `sun_clear`, `sun_between`, `sun_behind` | Skyline | today's sun scores, 0..1, maths unchanged |
+| `sun_visible_min`, `sun_hidden_elev`, `gap_width_deg` | Skyline | today's `Look` numbers |
+| `sun_bearing_diff(obj)` | Skyline | sun azimuth at sunset minus object bearing |
+
+`obj` is an object reference: `{"id": "costar:123"}`, or `{"kind": "tree", "near": "<other ref>",
+"within_m": 300}`, meaning the best-scoring object of that kind (which is how "pairs within range"
+works).
+
+### Expression language (JSON, small on purpose)
 ```jsonc
-// Brief: new optional field; old briefs still work
+{"f": "visible", "obj": {"kind": "fountain"}}        // feature
+{"num": 0.5}                                         // number
+{"op": "ramp", "x": E, "lo": 20, "hi": 5}            // 0 at lo, 1 at hi, linear, clamped (lo > hi allowed)
+{"op": "bump", "x": E, "at": 0, "width": 10}         // 1 at `at`, 0 beyond ±width
+{"op": "and" | "or" | "min" | "max" | "mul" | "add" | "avg", "of": [E, ...]}
+{"op": "not", "x": E}  {"op": "lt" | "gt", "x": E, "than": E}   // 0/1
+```
+Every expression evaluates to a number. Scores are clamped to 0..1.
+
+A **cost function** (library entry):
+```jsonc
+{ "name": "fountain_in_front_of_tower",
+  "about": "Fountain in frame, nearer than the tower, both visible",
+  "params": ["a", "b"],                    // object refs filled in per brief
+  "must": E,                               // optional gate: 0 drops the point
+  "score": E }                             // 0..1
+```
+Built-in entries (`sun_clear`, `sun_between`, `sun_behind`, `in_front`, `lined_up`, `between`,
+`beside`, `fills`) ship as seed JSON and are written in the same language, so the agent can read
+them as examples and copy them.
+
+### Goals in the brief (contract)
+```jsonc
 "goals": [
-  { "metric": { "kind": "sun", "framing": "between" }, "weight": 1.0 },
-  { "metric": { "kind": "relation", "rel": "in_front",
-                "a": { "kind": "fountain" }, "b": { "id": "costar:123" } }, "must": true }
-]
-// If "goals" is empty: goals = [ Sun(brief.framing) ], i.e. exactly today's behaviour.
-
-// Spot: new field, one entry per goal, same order
-"scores": [ { "score": 0.8, "why": "Sun sets in a 4° gap, 300 m away" }, ... ]
+  { "use": "sun_between", "weight": 1.0 },
+  { "use": "fountain_in_front_of_tower", "args": {"a": {"kind":"fountain"}, "b": {"id":"costar:123"}}, "must": true },
+  { "def": { ...inline cost function... }, "weight": 0.5 }       // a new one, not saved yet
+],
+"lens_deg": 60
 ```
-`Spot.sun` and `Spot.why` stay, so the web keeps working unchanged.
+No goals = `[{"use": "sun_<framing>"}]`, i.e. exactly today. Each Spot gets
+`scores: [{goal, score, why}]`. `why` comes from the entry's `about` plus the numbers.
 
-## Code shape (functional, core stays pure)
+### Agent loop (server, Claude)
+Tools: `list_cost_functions`, `define_cost_function` (validates, then test-runs the function on a
+sample of ~50 candidates and returns the score distribution plus 3 example points, so the agent can
+see whether it actually separates good points from bad), `save_cost_function`, `find_objects`
+(CoStar + cached Vexcel detection), `search` (goals -> spots), `investigate` (top K: oblique photo
+plus numbers, judged by the model), and `ask_user` (the chat).
+Library: `library/*.json` in git (seeds, plus ones we promote) plus `cache/library/*.json` (saved at
+runtime, gitignored).
 
+### Code shape
 ```
-crates/core/src/objects.rs   Object, bearing/distance/size, visible_fraction (ray march)
-crates/core/src/metrics.rs   Metric enum, Goal, tier(), score(metric, &View, &Ctx) -> Rated
-crates/core/src/search.rs    candidates -> funnel(goals) -> pick; sun code moved, not changed
-crates/server                object sources (CoStar now, Vexcel/OSM later), cached
-crates/server/src/agent      Claude: text -> goals; investigate top K; AI-only fallback
+crates/contracts   Goal, CostFn, Expr, ObjRef, Rated (serde)
+crates/core        features.rs (pure features + tiers), expr.rs (check + eval), funnel in search.rs
+crates/server      library store, object sources (CoStar, Vexcel detect, cached), agent tools, /api/chat
+web                chat panel replaces the brief box; spot card lists per-goal reasons
 ```
-`search(grid, objects, brief, utc_offset_s)`: objects come in as plain data, no IO.
 
-## Build order (each on its own branch, main stays demo-safe)
-
-1. 049 probe Vexcel object detection (classes, points or polygons, LA/Princeton).
-2. Contract PR: `goals` + `scores`, fixture updated, old briefs unchanged.
-3. core: metrics.rs + funnel, Sun ported; regression test: hero brief gives the same spots.
-4. core: objects.rs + relation metrics + marching; unit tests on a synthetic block.
-5. server: object source (CoStar first) + `/api/search` takes goals.
-6. agent: Claude picks goals from the text; investigates top K; AI-only fallback; "what's missing".
-7. web: show the per-goal reasons on the spot card.
-
-Steps 1-3 can merge before judging only if main's sunset demo is unchanged. If they aren't ready,
-the demo still shows sunsets solved, plus this doc as the roadmap.
+### Build order (v2)
+1. Contract PR: Goal / CostFn / Expr / ObjRef / Rated, plus old-brief compatibility.
+2. core: expr.rs + features.rs (sun features from today's code) + funnel. Regression: the hero LA
+   and Princeton briefs give identical spots.
+3. core: object features (dist/bearing/size/visible) + seed relation entries + marching candidates.
+4. server: library store + object sources + agent tools (define/test/save).
+5. server + web: /api/chat (multi-turn, asks until confident) + chat panel.
 
 ## Decisions (burvy, 2026-11-14)
 - Lens angle for "in one frame": 60° default (about 30 mm on full frame), and a brief can override it.
