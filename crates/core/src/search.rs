@@ -39,7 +39,8 @@ pub const STREET_SEARCH_M: f64 = 50.0;
 /// Standing surface: heights within this radius must vary by at most `MAX_ROUGHNESS_M`.
 pub const STAND_RADIUS_M: f64 = 2.0;
 pub const MAX_ROUGHNESS_M: f64 = 1.0;
-/// How far out the skyline is traced.
+/// How far out the skyline is traced from every candidate. Callers must fetch at least
+/// `skyline_need_m(area radius)` of height map, or rays stop early at the grid edge.
 pub const SKYLINE_RADIUS_M: f64 = 1500.0;
 /// Azimuth step of the skyline in the fast pass.
 pub const SKY_STEP_DEG: f64 = 0.5;
@@ -83,6 +84,12 @@ impl std::fmt::Display for SearchError {
 }
 
 impl std::error::Error for SearchError {}
+
+/// Radius of height map, around the area's centre, that a search needs: a candidate on the area's
+/// edge still sees `SKYLINE_RADIUS_M` of skyline in every direction.
+pub fn skyline_need_m(area_radius_m: f64) -> f64 {
+    area_radius_m + SKYLINE_RADIUS_M
+}
 
 /// Rank spots in `brief.area` for `brief`. `utc_offset_s` is the offset of the local day
 /// (e.g. -25200 for PDT), used for the times in the results.
@@ -558,6 +565,28 @@ mod tests {
         assert!(h.values.contains(&Some(1.0)));
         assert!(h.values[0].is_none(), "corner is outside the circle");
         assert_eq!(out.spots[0].score, 1.0);
+    }
+
+    #[test]
+    fn a_tower_1_km_outside_the_area_hides_the_sun() {
+        // 50 m area; a 120 m block, 300 m square, centred 1050 m out towards the sunset (1 km past the
+        // area's edge), wide enough that no candidate can see round it.
+        // The grid is exactly what skyline_need_m asks for, so every candidate sees it.
+        let n = (2.0 * skyline_need_m(50.0)).ceil() as u32;
+        let open = search(&grid(n, |_, _| None), &brief(50.0, Standing::Ground, Framing::Clear), PDT).unwrap();
+        assert!(open.spots[0].sun.hidden_at.is_none(), "{:?}", open.spots[0].sun);
+        // With the block, nothing sees a clear sunset; "behind" ranks the spots where it sets behind the block.
+        let g = grid(n, tower(sunset_az(), 1050.0, 300.0, 120.0));
+        let towered = search(&g, &brief(50.0, Standing::Ground, Framing::Behind), PDT).unwrap();
+        assert!(!towered.spots.is_empty());
+        for s in &towered.spots {
+            let sun = &s.sun;
+            assert!(sun.hidden_at.is_some() && sun.hidden_at < sun.flat_sunset, "{sun:?}");
+            // The block's near face is 900 m from the centre, 850-950 m from a spot: atan(118.3 / 950..850) = 7.1-7.9 deg.
+            // (The old 700 m fetch margin ended 750 m out, so this face was off the grid.)
+            let elev = sun.hidden_elev_deg.unwrap();
+            assert!((7.0..8.0).contains(&elev), "{sun:?}");
+        }
     }
 
     #[test]
