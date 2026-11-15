@@ -65,7 +65,12 @@ struct Place {
 }
 
 pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result<CallSheet, ApiErr> {
-    let llm = Claude::from_env(&st.http);
+    run_with(st, req, now, Claude::from_env(&st.http)).await
+}
+
+/// `run` with the model passed in: `None` is the offline mock (tests use it so a key in the environment
+/// can't make them call the real API).
+async fn run_with(st: &AppState, req: AgentRequest, now: DateTime<Utc>, llm: Option<Claude>) -> Result<CallSheet, ApiErr> {
     let mut log = Log::default();
     let clock = std::time::Instant::now();
     let mut split: Vec<(&str, u128)> = Vec::new();
@@ -842,6 +847,47 @@ mod tests {
         assert!(write_with_claude(&g, &la_place(), &fixture_sheet()).await.unwrap_err().contains("JSON"));
         let (g, _) = fake_claude(json!({"type": "message", "stop_reason": "refusal", "content": []})).await;
         assert!(write_with_claude(&g, &la_place(), &fixture_sheet()).await.unwrap_err().contains("declined"));
+    }
+
+    // ---- the whole agent, offline: synthetic grid, no model (the mock), no network ----
+
+    fn agent_req(text: &str) -> AgentRequest {
+        AgentRequest {
+            text: text.into(),
+            area: Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0 }),
+            date: Some("2026-06-21".into()),
+            tz: "America/Los_Angeles".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_agent_writes_a_sheet_from_the_tools() {
+        let st = crate::testkit::state(crate::testkit::city());
+        let sheet = run_with(&st, agent_req("sunset, clear view, roof or street"), now(), None).await.unwrap();
+        assert_eq!(sheet.model, "mock");
+        assert_eq!(sheet.brief.date, "2026-06-21");
+        assert_eq!(sheet.spots.iter().filter(|s| s.role == SpotRole::Primary).count(), 1);
+        assert_eq!(sheet.spots[0].role, SpotRole::Primary);
+        assert!(sheet.spots.len() <= 3);
+        let tools: Vec<&str> = sheet.steps.iter().map(|s| s.tool.as_str()).collect();
+        for t in ["read", "search", "sun", "write"] {
+            assert!(tools.contains(&t), "no {t} step in {tools:?}");
+        }
+        assert!(!tools.contains(&"plan"), "nothing to re-plan: {tools:?}");
+        assert!(sheet.caveats.iter().any(|c| c.contains("offline mock")));
+        // Synthetic heights are not Vexcel, so no photo was fetched.
+        assert!(sheet.spots.iter().all(|s| s.photo_url.is_none()));
+    }
+
+    #[tokio::test]
+    async fn mock_agent_relaxes_a_brief_nothing_fits() {
+        // Flat ground: no roofs and no buildings to frame the sun, so "between, from a roof" finds nothing.
+        let st = crate::testkit::state(crate::testkit::grid(&[]));
+        let sheet = run_with(&st, agent_req("sunset between two buildings from a rooftop"), now(), None).await.unwrap();
+        assert!(sheet.steps.iter().any(|s| s.tool == "plan" && s.summary.contains("relaxing to any open view")), "{:?}", sheet.steps);
+        assert_eq!((sheet.brief.framing, sheet.brief.standing), (Framing::Clear, Standing::Any));
+        assert_eq!(sheet.spots.iter().filter(|s| s.role == SpotRole::Primary).count(), 1);
+        assert_eq!(sheet.spots[0].spot.standing, Standing::Ground);
     }
 
     #[test]

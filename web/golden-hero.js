@@ -79,7 +79,8 @@
   }catch(e){$('#hwx').textContent='Weather temporarily unavailable'} }
   /* Buildings from the golden server's height map (/api/scene: Vexcel, or USGS LiDAR outside Vexcel's area).
      Ring 1 has 4 m cells over ~1 km; every cell standing 3 m or more above the local ground becomes a box. */
-  const API = /^https?:/.test(location.protocol) ? location.origin : 'http://localhost:8787';
+  // the page's API base (index.html CFG: location.origin, or origin+?api=/golden on burvy.dev)
+  const API = typeof CFG==='object' && CFG.base ? CFG.base : /^https?:/.test(location.protocol) ? location.origin : 'http://localhost:8787';
   async function buildings(){
     try{
       const c=new AbortController(),to=setTimeout(()=>c.abort(),120000);

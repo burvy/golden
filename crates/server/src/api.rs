@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use chrono::NaiveDate;
 use contracts::{Brief, BuildingList, Event, PhotoKind, PhotoMeta, SearchResult, Standing};
 use golden_core::horizon::{horizon, HorizonQuery};
-use golden_core::search::skyline_need_m;
+use golden_core::search::{skyline_need_m, SKYLINE_RADIUS_M};
 use golden_core::sunblock::sun_block;
 use serde::Deserialize;
 
@@ -116,7 +116,7 @@ async fn get_horizon(State(st): State<Arc<AppState>>, q: Q<HorizonQ>) -> Result<
         lat: q.lat,
         lon: q.lon,
         above_m: in_range("above_m", q.above_m.unwrap_or(1.7), 0.0, 500.0)?,
-        radius_m: in_range("radius_m", q.radius_m.unwrap_or(1500.0), 50.0, 3000.0)?,
+        radius_m: in_range("radius_m", q.radius_m.unwrap_or(SKYLINE_RADIUS_M), 50.0, 3000.0)?,
         step_deg: in_range("step_deg", q.step_deg.unwrap_or(1.0), 0.25, 10.0)?,
         az_from: q.az_from.unwrap_or(0.0),
         az_to: q.az_to.unwrap_or(360.0),

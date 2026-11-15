@@ -2,7 +2,7 @@
 //! steps: reading the typed brief and writing the sheet's words. Every number still comes from our tools;
 //! `times::times_ok` rejects text that mentions a time the tools didn't produce.
 //!
-//! Keys (environment or `env/.env`, never printed): `ANTHROPIC_API_KEY`, optional `GOLDEN_CLAUDE_MODEL`
+//! Keys (environment, the bare-key file in `ANTHROPIC_ENV_FILE`, or `env/.env`; never printed): `ANTHROPIC_API_KEY`, optional `GOLDEN_CLAUDE_MODEL`
 //! (default `claude-sonnet-5-5`) and `ANTHROPIC_BASE_URL` (default `https://api.anthropic.com`).
 
 use std::time::Duration;

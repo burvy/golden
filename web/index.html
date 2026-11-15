@@ -140,6 +140,8 @@ const $=s=>document.querySelector(s),rad=Math.PI/180;let TZ='America/Los_Angeles
 let BB={n:34.066,s:34.034,w:-118.272,e:-118.224},AREA=null,DATE_SET=false;
 const clk=t=>new Date(t).toLocaleTimeString('en-US',{timeZone:TZ,hour:'numeric',minute:'2-digit'});
 if(location.protocol.startsWith('http'))$('#base').value=location.origin; // served by the golden server: talk to it
+// ?api=/golden: the API sits under that path on this origin (burvy.dev proxies /golden/api to the golden server). Same-origin paths only.
+{const a=new URLSearchParams(location.search).get('api');if(location.protocol.startsWith('http')&&a&&/^\/(?!\/)/.test(a))$('#base').value=location.origin+a.replace(/\/$/,'')}
 // the API box is for developers: hidden when served over http unless the URL has ?settings
 if(location.protocol.startsWith('http')&&!new URLSearchParams(location.search).has('settings'))$('#apiset').hidden=true;
 const PHONE=matchMedia('(max-width:900px)');
@@ -160,7 +162,7 @@ const REAL={
   TZ=br.tz;AREA=br.area;$('#date').value=br.date;
   return{spots:sh.spots.map(spotUI),sun_path:[],call_sheet_text:sheetText(sh),call_sheet:sh}},
  async '/api/sun'(p){return(await getJ('/api/sun',{lat:p.lat,lon:p.lon,date:p.date,tz:TZ,step_min:5})).points},
- async '/api/spot/horizon'(p){const r=await getJ('/api/horizon',{lat:p.lat,lon:p.lon,above_m:1.7,radius_m:700,step_deg:1});return r.points.map(q=>({az_deg:q.az_deg,elev_deg:q.elev_deg}))},
+ async '/api/spot/horizon'(p){const r=await getJ('/api/horizon',{lat:p.lat,lon:p.lon,above_m:1.7,step_deg:1});return r.points.map(q=>({az_deg:q.az_deg,elev_deg:q.elev_deg}))},
  async '/api/scene'(p){const m=await getJ('/api/scene',{lat:p.lat,lon:p.lon,radius_m:500,detail:'phone'}),buf=new DataView(await (await raw(m.data_url)).arrayBuffer());
   // ring 1 (4 m cells, ~1 km across) shows the towers that matter; ring 0 alone is only ~250 m
   const ring=m.rings.find(r=>r.cell_m>=2)||m.rings[m.rings.length-1],n=ring.width,hs=new Array(n*n);
