@@ -32,10 +32,21 @@ pub async fn get_bytes(
     url: &str,
     query: &[(&str, &str)],
 ) -> Result<Vec<u8>, Error> {
+    with_backoff(|| http.get(url).query(query).header("X-API-KEY", key.expose())).await
+}
+
+/// POST a JSON body to a Vexcel URL and return the response body, with the same backoff as `get_bytes`.
+pub async fn post_json(http: &reqwest::Client, key: &ApiKey, url: &str, body: &serde_json::Value) -> Result<Vec<u8>, Error> {
+    let bytes = serde_json::to_vec(body)?;
+    with_backoff(|| http.post(url).header("content-type", "application/json").header("X-API-KEY", key.expose()).body(bytes.clone())).await
+}
+
+/// Send the request `build` makes, again after a backoff on 429 / 5xx / timeouts.
+async fn with_backoff(build: impl Fn() -> reqwest::RequestBuilder) -> Result<Vec<u8>, Error> {
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let resp = http.get(url).query(query).header("X-API-KEY", key.expose()).send().await;
+        let resp = build().send().await;
         let retry_after = match resp {
             Ok(r) if r.status().is_success() => return Ok(r.bytes().await?.to_vec()),
             Ok(r) if is_retryable(r.status().as_u16()) => header_secs(&r),
