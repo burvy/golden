@@ -178,6 +178,31 @@ mod tests {
         assert!(h.width <= contracts::search::MAX_HEAT_SIDE && h.height <= contracts::search::MAX_HEAT_SIDE);
         assert_eq!(h.values.len(), (h.width * h.height) as usize);
         assert!(h.values.iter().any(Option::is_some));
+        // one layer for the implicit sun goal, the fixed funnel stages, the spacing
+        assert_eq!(r.layers.len(), 1);
+        assert_eq!(r.layers[0].goal, "sun_clear");
+        assert_eq!(r.stages.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["Points in the area", "Somewhere to stand"]);
+        assert_eq!(r.stages[1].n, r.searched);
+        assert!(r.spacing_m.unwrap() >= 40.0);
+    }
+
+    #[tokio::test]
+    async fn search_takes_edited_goal_formulas() {
+        // what the page sends after a formula edit: the brief with its goals
+        let st = Arc::new(testkit::state(testkit::city()));
+        let mut b: serde_json::Value = serde_json::from_str(&brief(300.0, "any", "clear")).unwrap();
+        b["goals"] = serde_json::json!([
+            {"use": "sun_clear"},
+            {"def": {"name": "low", "about": "Under 20 m: easy to reach", "score": {"op": "lt", "x": {"f": "ground_m"}, "than": {"num": 20}}}, "must": true}
+        ]);
+        let req = Request::post("/api/search").header("content-type", "application/json").body(Body::from(b.to_string())).unwrap();
+        let (status, bytes) = send(&st, req).await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&bytes));
+        let r: contracts::SearchResult = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(r.layers.iter().map(|l| (l.goal.as_str(), l.must)).collect::<Vec<_>>(), [("sun_clear", false), ("low", true)]);
+        assert_eq!(r.stages.last().unwrap().goal.as_deref(), Some("low"));
+        assert_eq!(r.stages.last().unwrap().label, "Under 20 m");
+        assert!(r.spots.iter().all(|s| s.ground_m < 20.0));
     }
 
     #[tokio::test]
