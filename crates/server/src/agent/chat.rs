@@ -164,7 +164,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     log.add("chat", format!("Understood after {qs}: {} (by {by})", words.join(", ")));
     let note = cant_check_note(&unchecked, brief.event);
     if let Some(n) = &note {
-        log.add("goals", format!("{n} (object goals need core task 052)"));
+        log.add("goals", format!("{n} Spots are ranked on the sun only; objects arrive with the next core update."));
     }
     // The search gets only the goals it can score (an unknown name is an error since 051). The sheet writer
     // reads brief.text: tell it what the search ignored, then put the user's words back.
@@ -837,7 +837,7 @@ mod tests {
         assert_eq!(sheet.brief.goals, [Goal::using("sun_clear")], "the search only got the goal it can score");
         assert!(sheet.spots[0].spot.scores.iter().all(|r| r.goal == "sun_clear"));
         assert_eq!(sheet.caveats[0], r.note.unwrap());
-        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("052")), "{:?}", sheet.steps);
+        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("next core update")), "{:?}", sheet.steps);
     }
 
     #[tokio::test]
