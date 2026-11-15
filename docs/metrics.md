@@ -119,8 +119,10 @@ crates/server/src/agent      Claude: text -> goals; investigate top K; AI-only f
 Steps 1-3 can merge before judging only if main's sunset demo is unchanged. If they aren't ready,
 the demo still shows sunsets solved, plus this doc as the roadmap.
 
-## Open questions
-- Lens angle for "in one frame": a fixed default (e.g. 60°, ~30 mm on full frame) or from the brief?
-- Object kinds vocabulary: whatever Vexcel detects + CoStar "building". Fixed list or free text the
-  AI maps onto it?
-- Weights: from the AI per brief, or fixed per metric to start?
+## Decisions (burvy, 2026-11-14)
+- Lens angle for "in one frame": 60° default (about 30 mm on full frame), and a brief can override it.
+- Object kinds: a fixed list in contracts (whatever Vexcel detects that we've checked, plus "building"). Vexcel detection is
+  open-vocabulary (task 049, docs/burvy/detect-probe.md), so a kind is just its label string, and adding one is one line.
+- Weights: fixed per metric to start. The AI picking weights per brief comes later.
+- Object positions from Vexcel: `POST /v2/elements/detect` returns a lon/lat box per object (centre = position), ~3 s per
+  150 m box. Cache every response and only query boxes around the search area.
