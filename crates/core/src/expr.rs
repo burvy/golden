@@ -52,7 +52,9 @@ impl Checked {
     }
 }
 
-/// A checked expression: `contracts::Expr` with features resolved.
+/// A checked expression: `contracts::Expr` with features resolved. Leaves are numbers or features;
+/// a later AI leaf (`{"ai": {question, image}}`, task 058) would resolve to a feature-like key whose
+/// value the caller's lookup supplies, so `eval` and `tier` stay as they are.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Feat(Call),

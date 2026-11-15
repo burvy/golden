@@ -29,6 +29,9 @@ pub enum Tier {
     Ray,
     /// The skyline over the sun's path.
     Skyline,
+    // Later (task 058): `Ai`, a model call such as a vision question, ordered last so it only runs
+    // on candidates every cheaper gate kept. Its value would come from an input map the server
+    // fills, looked up like any other feature.
 }
 
 impl Tier {
