@@ -92,6 +92,23 @@ a{color:var(--link)}
 #hplace{font:700 clamp(22px,3.4vw,38px) "Bricolage Grotesque",sans-serif;letter-spacing:-.01em}
 #htime{font-size:clamp(18px,2.4vw,26px)}#hwx,#hsun{font-size:clamp(14px,1.8vw,18px);color:#f6d9b0}
 #hero .small{font-size:13px;color:#e9c9a0;margin:12px 0 0}
+/* chat brief (task 054): agent bubbles on the sky tint, the user's in deep sky, quick replies in sunset orange */
+.chathead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px}.chathead label{margin:0}
+.linkbtn{background:none;border:0;padding:4px 2px;color:var(--link);font-size:13px;text-decoration:underline;cursor:pointer}
+#chatlog{display:flex;flex-direction:column;gap:8px;max-height:min(46vh,420px);overflow-y:auto;padding:2px 2px 4px;scroll-behavior:smooth}
+.b{max-width:88%;padding:8px 12px;border-radius:14px;line-height:1.4;overflow-wrap:anywhere}
+.b.agent{align-self:flex-start;background:var(--tint);border:1px solid var(--line);border-bottom-left-radius:4px}
+.b.user{align-self:flex-end;background:var(--sky-deep);color:#fff;border-bottom-right-radius:4px}
+.b.err{border-color:var(--sun);color:var(--sun-ink)}.b .chip{margin:2px 2px 0 0}
+.dots i{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:var(--sky);animation:pp 1.2s ease-in-out infinite;opacity:.3}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+#chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}#chips:empty{display:none}
+#chips button{border-radius:99px;padding:6px 12px;background:var(--panel);border-color:var(--sun);color:var(--sun-ink);font-weight:600}
+#chips button.def{background:linear-gradient(180deg,var(--sun2),var(--sun));color:var(--on-sun)}#chips small{font-weight:500;opacity:.8}
+#known{margin-top:8px;font-size:13px;line-height:1.9}#known:empty{display:none}
+.chip.pick{border-style:dashed;background:var(--panel);color:var(--mute);font-weight:500}
+#chatform{display:flex;gap:8px;margin-top:10px;align-items:flex-end}#chatform textarea{min-height:44px;height:44px;flex:1;resize:none;line-height:1.35}
+@media(prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.7}#chatlog{scroll-behavior:auto}}
 /* Phone and tablet (task 028): one column in the order you use it — brief, spots, a full-width map, the spot's view,
    then the call sheet. 16px inputs (iOS zooms on smaller), 44px touch targets, and the inline 3D view lets vertical
    swipes scroll the page (full screen still looks up and down). */
@@ -108,6 +125,7 @@ a{color:var(--link)}
  input[type=range]{height:44px}
  #v3,.view:not(.big) #v3 canvas{touch-action:pan-y!important}
  pre{max-height:50vh;overflow:auto}
+ #chatlog{max-height:42vh;max-height:42svh}#chips button{min-height:44px}
  #hero .row button{min-height:48px;padding:10px 22px;font-size:17px}
 }
 </style></head><body>
@@ -120,9 +138,12 @@ a{color:var(--link)}
 <details id="apiset" style="margin-left:auto"><summary>API settings</summary><div class="row"><input id="base" value="http://localhost:8787" aria-label="API base URL" size="26"><button id="save">Use</button></div></details></header>
 <main>
 <div class="col">
-<section class="panel" id="briefp"><label for="brief">Shot brief</label><p class="note" style="margin:-2px 0 6px">Say the shot, the place and the day, e.g. “sunrise from the street in Downtown LA, late June”.</p>
-<textarea id="brief">Sun setting between two buildings, from a rooftop in Princeton, NJ, tonight</textarea>
-<div class="row"><input type="date" id="date" aria-label="Date (optional: the agent reads it from the brief)" title="Optional. Leave it and the agent reads the day from the brief."><button class="go" id="find">Find spots</button></div></section>
+<section class="panel" id="briefp" aria-label="Shot brief chat"><div class="chathead"><label for="brief">Tell us the shot</label><button type="button" class="linkbtn" id="restart">New brief</button></div>
+<div id="chatlog" role="log" aria-live="polite"></div>
+<div id="chips" aria-label="Quick replies"></div>
+<div id="known" aria-live="polite"></div>
+<form id="chatform"><textarea id="brief" rows="1" enterkeyhint="send" placeholder="e.g. sunset between two towers from a rooftop in Downtown LA" aria-label="Message"></textarea><button class="go" id="find">Send</button></form>
+<div class="row"><button type="button" id="gonow" hidden>Search now with your picks</button><input type="date" id="date" aria-label="Date (optional: the agent reads it from the chat)" title="Optional. Leave it and the agent reads the day from the chat."></div></section>
 <section class="panel" id="sheet" hidden aria-live="polite"><div id="cs"></div><pre id="sheetText"></pre><div class="row"><button id="copy">Copy as text</button></div></section>
 <section class="panel" id="listp" aria-live="polite"><div id="list"><div class="msg">Describe a shot to see ranked spots.</div></div></section>
 </div>
@@ -201,12 +222,49 @@ function fitBB(W,H){if(!AREA||!W||!H)return;const dLat=AREA.radius_m*1.25/111320
 /* ---------- state ---------- */
 const S={spots:[],path:[],sheet:'',cs:null,sel:null,d:{},tab:'h',t:0,tok:0,rise:false,busy:false,err:''};
 /* ---------- search ---------- */
-async function search(ev){const brief=$('#brief').value.trim();if(!brief)return;S.busy=true;S.err='';S.sel=null;$('#find').disabled=true;
- const t0=Date.now(),say=()=>{$('#list').innerHTML=`<div class="msg"><b>The agent is working</b> · ${Math.round((Date.now()-t0)/1e3)} s<ol class="pipe">${PIPE.map(p=>`<li>${p}</li>`).join('')}</ol><small>Usually 10–20 s. A new area downloads its height map first, which can take a minute.</small></div>`};$('#sheet').hidden=true;say();const tick=setInterval(say,1000);
+/* The list panel while the agent searches. */
+function working(t0){$('#sheet').hidden=true;$('#list').innerHTML=`<div class="msg"><b>The agent is working</b> · ${Math.round((Date.now()-t0)/1e3)} s<ol class="pipe">${PIPE.map(p=>`<li>${p}</li>`).join('')}</ol><small>Usually 10–20 s. A new area downloads its height map first, which can take a minute.</small></div>`}
+/* One-shot search (the old brief box): only used when there's no server, so the page still works from a file. */
+async function search(ev,brief){if(!brief)return;S.busy=true;S.err='';S.sel=null;$('#find').disabled=true;
+ const t0=Date.now(),say=()=>working(t0);say();const tick=setInterval(say,1000);
  S.rise=/sunrise|rising|dawn/i.test(brief);VIEW.k=1;VIEW.dx=VIEW.dy=0;
  try{const r=await call('/api/search',null,{brief,date:DATE_SET?$('#date').value:null,area:BB});S.spots=r.spots.slice().sort((a,b)=>b.score-a.score);S.path=r.sun_path;S.sheet=r.call_sheet_text||'';S.cs=r.call_sheet||null}
  catch(e){S.spots=[];S.cs=null;S.sheet='';S.err='Search failed. Check the server and try again.'}
  clearInterval(tick);S.busy=false;$('#find').disabled=false;renderSheet();renderList();drawMap();if(S.spots.length){select(S.spots[0]);if(PHONE.matches&&ev)$('#mapp').scrollIntoView({behavior:'smooth',block:'start'})}}
+/* ---------- chat: the brief as a conversation (POST /api/chat, docs/contracts.md#chatrequest-and-chatreply) ----------
+   Stateless: we send the whole conversation each turn. The agent asks at most 3 short questions (quick replies,
+   default first), then settles the brief, searches, and returns the call sheet, which fills the list, map and card. */
+const CHAT={m:[],busy:false,done:false};
+const GREET='What do you want to shoot? Tell me the place, the light and the day if you know them. I’ll ask about anything that changes where you should stand.';
+function bubble(role,html,cls=''){const d=document.createElement('div');d.className=`b ${role} ${cls}`;d.innerHTML=html;const L=$('#chatlog');L.appendChild(d);L.scrollTop=L.scrollHeight;return d}
+const PICK=/ \(my pick\)$/;
+function knownHTML(w){return w.map(x=>PICK.test(x)?`<span class="chip pick" title="My pick: say if you want something else">${esc(x.replace(PICK,''))} · my pick</span>`:`<span class="chip">${esc(x)}</span>`).join(' ')}
+function chips(list){const c=$('#chips');c.innerHTML=list.map((t,i)=>`<button type="button" class="${i?'':'def'}" data-c="${i}">${esc(t)}${i?'':' <small>· default</small>'}</button>`).join('');
+ c.querySelectorAll('button').forEach(b=>b.onclick=()=>send(list[+b.dataset.c],false,true))}
+function newChat(){CHAT.m=[];CHAT.done=false;$('#chatlog').innerHTML='';bubble('agent',esc(GREET));chips([]);$('#known').innerHTML='';$('#gonow').hidden=true}
+function busy(on){CHAT.busy=on;$('#find').disabled=$('#gonow').disabled=on}
+async function send(text,go,ev){text=(text||'').trim();if(CHAT.busy||(!text&&!go))return;
+ if(CHAT.done)newChat(); // after a search, the next message starts a new brief
+ if(text){CHAT.m.push({role:'user',text});bubble('user',esc(text))}$('#brief').value='';chips([]);busy(true);
+ const t0=Date.now(),wait=bubble('agent','<span class="dots" aria-label="Thinking"><i></i><i></i><i></i></span>','typing');
+ // a question comes back in a few seconds; longer means it's searching
+ const slow=setInterval(()=>{const s=Math.round((Date.now()-t0)/1e3);if(s>=3){wait.textContent=`Searching the height map… ${s} s`;working(t0)}},1000);
+ try{const body={messages:CHAT.m,go:!!go};if(DATE_SET&&$('#date').value)body.date=$('#date').value;
+  const r=await raw('/api/chat',null,body,300e3).then(r=>r.json());LIVE['/api/chat']=1;showApi();wait.remove();
+  if(r.ask){CHAT.m.push({role:'agent',text:r.ask.question});bubble('agent',esc(r.ask.question));chips(r.ask.choices);
+   $('#known').innerHTML=r.understood.length?`<span class="mute">So far:</span> ${knownHTML(r.understood)}`:'';$('#gonow').hidden=false;
+   if($('#list').querySelector('.pipe'))renderList()}
+  else{CHAT.done=true;$('#gonow').hidden=true;$('#known').innerHTML='';const n=r.sheet.spots.length;
+   bubble('agent',`Searched for ${knownHTML(r.understood)}<br>${n?`Found ${n} spot${n>1?'s':''}: they’re on the map, best first, with a call sheet.`:'No spots fit.'} Type a new brief to start again.`);
+   applySheet(r.sheet,ev)}}
+ catch(e){wait.remove();
+  if(e instanceof TypeError){LIVE['/api/chat']=0;showApi();CHAT.done=true;bubble('agent','No server reachable, so here are sample results.','err');await search(ev,CHAT.m.filter(x=>x.role==='user').map(x=>x.text).join('. '))}
+  else{bubble('agent',`That didn’t work: ${esc(e.message)}. Try different words, or press “Search now”.`,'err');$('#gonow').hidden=false;renderList()}}
+ finally{clearInterval(slow);busy(false)}}
+/* The agent's call sheet -> the list, map, card and sheet panels. */
+function applySheet(sh,ev){const br=sh.brief;TZ=br.tz;AREA=br.area;$('#date').value=br.date;S.rise=br.event==='sunrise';VIEW.k=1;VIEW.dx=VIEW.dy=0;
+ S.spots=sh.spots.map(spotUI).sort((a,b)=>b.score-a.score);S.path=[];S.sheet=sheetText(sh);S.cs=sh;S.err='';S.sel=null;
+ renderSheet();renderList();drawMap();if(S.spots.length){select(S.spots[0]);if(PHONE.matches&&ev)$('#mapp').scrollIntoView({behavior:'smooth',block:'start'})}}
 function renderList(){const L=$('#list');if(S.err){L.innerHTML=`<div class="msg err">${S.err}</div>`;return}
  if(!S.spots.length){L.innerHTML='<div class="msg">No spots matched. Try a wider brief or another date.</div>';return}
  L.innerHTML=S.spots.map((s,i)=>`<button class="spot" data-i="${i}" aria-pressed="${S.sel&&S.sel.id===s.id}"><span class="sc">${Math.round(s.score*100)}</span><span><b>${s.id}</b> · ${s.height_m} m<small>Sun gone at ${clk(s.sun_visible_until)}</small><small>${s.why}</small></span></button>`).join('');
@@ -216,7 +274,7 @@ const PIPE=['Read the brief','Search spots on the height map','Work out sun time
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const day=d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{timeZone:'UTC',weekday:'short',day:'numeric',month:'short',year:'numeric'});
 const telHref=p=>'tel:'+String(p).replace(/[^\d+]/g,'');
-const STEP={read:'Read',plan:'Plan',search:'Search',sun:'Sun',photo:'Photo',buildings:'Buildings',write:'Write',geocode:'Place'};
+const STEP={chat:'Chat',read:'Read',plan:'Plan',search:'Search',sun:'Sun',photo:'Photo',buildings:'Buildings',write:'Write',geocode:'Place'};
 function renderSheet(){const sh=S.cs;$('#sheet').hidden=!sh&&!S.sheet;$('#sheetText').hidden=!!sh;$('#sheetText').textContent=sh?'':S.sheet;
  if(!sh){$('#cs').innerHTML=S.sheet?'<h3>Call sheet</h3>':'';return}
  const rise=sh.brief.event==='sunrise',H=(t,x)=>`<h4>${t}</h4>${x}`;
@@ -385,9 +443,14 @@ const MOCK={
  photo(az){const c=document.createElement('canvas');c.width=480;c.height=300;const x=c.getContext('2d'),g=x.createLinearGradient(0,0,0,300);g.addColorStop(0,'#5a3f7a');g.addColorStop(1,'#f5905a');x.fillStyle=g;x.fillRect(0,0,480,300);x.fillStyle='#232a3c';const r=rng(Math.round(az));for(let i=0;i<14;i++){const w=20+r()*40,h=40+r()*150;x.fillRect(i*36,300-h,w,h)}x.fillStyle='#fff';x.font='13px sans-serif';x.fillText('Sample view toward '+Math.round(az)+'°',12,22);return c.toDataURL()}};
 /* Live 3D homepage loaded separately; frontend-only implementation. */
 /* ---------- wire up ---------- */
-$('#find').onclick=search;$('#date').onchange=()=>DATE_SET=!!$('#date').value;$('#save').onclick=()=>{CFG.base=$('#base').value.replace(/\/$/,'');for(const k in LIVE)delete LIVE[k];showApi();search()};
+$('#chatform').onsubmit=e=>{e.preventDefault();send($('#brief').value,false,true)};
+$('#brief').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send($('#brief').value,false,true)}};
+$('#gonow').onclick=()=>send('',true,true);$('#restart').onclick=newChat;
+$('#date').onchange=()=>DATE_SET=!!$('#date').value;$('#save').onclick=()=>{CFG.base=$('#base').value.replace(/\/$/,'');for(const k in LIVE)delete LIVE[k];showApi();newChat()};
 $('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(S.sheet);e.target.textContent='Copied'}catch(_){e.target.textContent='Select the text to copy'}setTimeout(()=>e.target.textContent='Copy text',1500)};
-addEventListener('resize',drawMap);search();
+addEventListener('resize',drawMap);
+// open on a finished example (behind the intro), so the map has spots the moment it's dismissed
+newChat();send('Sun setting between two buildings, from a rooftop in Princeton, NJ, tonight');
 </script>
 <script src="golden-hero.js"></script>
 </body></html>
