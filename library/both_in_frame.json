@@ -1,0 +1,37 @@
+{
+  "name": "both_in_frame",
+  "about": "a and b both in one frame and both in view (e.g. two towers in the shot). Its must (a and b within a lens angle of each other) drops points before any line-of-sight march",
+  "params": [
+    "a",
+    "b"
+  ],
+  "must": {
+    "op": "gt",
+    "x": {
+      "f": "in_frame",
+      "a": "a",
+      "b": "b"
+    },
+    "than": {
+      "num": 0
+    }
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "f": "in_frame",
+        "a": "a",
+        "b": "b"
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      },
+      {
+        "f": "visible",
+        "obj": "b"
+      }
+    ]
+  }
+}
