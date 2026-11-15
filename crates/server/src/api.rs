@@ -317,7 +317,10 @@ async fn get_photo(q: Q<PhotoQ>) -> Result<Response, ApiErr> {
 async fn fetch_oblique(req: &PhotoReq) -> Result<vexcel::Oblique, ApiErr> {
     vexcel::get_oblique_with(req.lat, req.lon, req.az, &req.options()).await.map_err(|e| match e {
         vexcel::Error::NoKey if crate::guard::get().offline => crate::guard::offline_err("no aerial photo here"),
-        vexcel::Error::NoKey => ApiErr(axum::http::StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+        vexcel::Error::NoKey => {
+            eprintln!("oblique: {e}");
+            ApiErr(axum::http::StatusCode::SERVICE_UNAVAILABLE, "aerial photos aren't available on this server".into())
+        }
         vexcel::Error::Api { status: 403 | 404, .. } => ApiErr::unprocessable("no Vexcel aerial photo here"),
         vexcel::Error::BadData(m) => ApiErr::bad(m),
         other => {

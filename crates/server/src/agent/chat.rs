@@ -193,7 +193,8 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
                 t
             }
             Err(e) => {
-                log.add("chat", format!("Claude couldn't follow the chat ({e}); using the offline reader"));
+                eprintln!("chat: Claude couldn't follow the chat: {e}");
+                log.add("chat", "Claude couldn't follow the chat; using the built-in reader");
                 mock_turn(&req, &text, today)
             }
         },
@@ -228,7 +229,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model, note: None });
     }
 
-    let by = if model == "mock" { "the offline reader".to_string() } else { model.clone() };
+    let by = if model == "mock" { "the built-in reader".to_string() } else { model.clone() };
     let qs = match asked {
         0 => "no questions".to_string(),
         1 => "1 question".to_string(),

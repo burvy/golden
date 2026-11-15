@@ -166,7 +166,7 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
         log.add("buildings", match st.kit {
             Some(_) if near > 0 => format!("{roofs} roof spot(s); {found} on a CoStar building, {near} next to one (nearest within {NEARBY_BUILDING_M:.0} m)"),
             Some(_) => format!("{roofs} roof spot(s); {found} matched to a CoStar building"),
-            None => format!("{roofs} roof spot(s); CoStar kit not loaded, so no access contacts"),
+            None => format!("{roofs} roof spot(s); building contacts aren't available on the public demo"),
         });
     }
 
@@ -184,11 +184,15 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
                 model = g.model.clone();
                 log.add("write", format!("{} wrote the sheet; every time in it was checked against the tools", g.model));
             }
-            Err(why) => log.add("write", format!("Kept the templated wording: {why}")),
+            Err(why) => {
+                eprintln!("agent: kept the templated wording: {why}");
+                log.add("write", "Kept the built-in wording: Claude's version wasn't available or didn't pass the time check");
+            }
         }
     } else {
-        log.add("write", "Wrote the sheet from templates (no ANTHROPIC_API_KEY: offline mock)");
-        sheet.caveats.push("Written by the offline mock (no Claude key yet): the wording is templated; all numbers come from the tools.".into());
+        // User-facing: no env var names here (task 072); the server log says which key is missing.
+        log.add("write", "Wrote the sheet with the built-in templates");
+        sheet.caveats.push("Planned with the built-in reader: the wording is templated; all numbers come from the tools.".into());
     }
     lap("write", &mut split);
     eprintln!("agent: {}", split.iter().map(|(n, ms)| format!("{n} @{ms} ms")).collect::<Vec<_>>().join(", "));
@@ -202,14 +206,17 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
 async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: Option<&Claude>, log: &mut Log) -> Result<(Brief, Place), ApiErr> {
     let text = req.text.trim();
     let mut fields = Fields::read(text);
-    let mut by = "the offline reader";
+    let mut by = "the built-in reader";
     if let Some(g) = llm {
         match claude_read(g, text, now, req).await {
             Ok(v) => {
                 by = "Claude";
                 fields = fields.with_model(&v);
             }
-            Err(e) => log.add("read", format!("Claude couldn't read the brief ({e}); using the offline reader")),
+            Err(e) => {
+                eprintln!("agent: Claude couldn't read the brief: {e}");
+                log.add("read", "Claude couldn't read the brief; using the built-in reader");
+            }
         }
     }
     let (brief, place) = settle(st, text, &fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, log).await?;
@@ -652,7 +659,7 @@ fn assemble(
     }
     if spots.iter().any(|s| s.spot.standing == Standing::Roof) {
         match costar {
-            Costar::NoKit => caveats.push("CoStar kit isn't loaded on this server, so roof spots have no access contacts yet".into()),
+            Costar::NoKit => caveats.push("Building contacts aren't available on the public demo: ask the building's front desk or manager for roof access".into()),
             Costar::NotHere => caveats.push(
                 "CoStar's building data covers Los Angeles and Houston, not this area, so there are no access contacts: ask the building's front desk or manager".into(),
             ),
@@ -929,7 +936,7 @@ mod tests {
         // the offline reader's reading of the words: sunset, street, between
         assert_eq!((brief.event, brief.standing, brief.framing), (Event::Sunset, Standing::Ground, Framing::Between));
         assert!(log.0.iter().any(|s| s.summary.starts_with("Claude couldn't read the brief")));
-        assert!(log.0.last().unwrap().summary.ends_with("(by the offline reader)"));
+        assert!(log.0.last().unwrap().summary.ends_with("(by the built-in reader)"));
     }
 
     #[tokio::test]
@@ -987,7 +994,8 @@ mod tests {
             assert!(tools.contains(&t), "no {t} step in {tools:?}");
         }
         assert!(!tools.contains(&"plan"), "nothing to re-plan: {tools:?}");
-        assert!(sheet.caveats.iter().any(|c| c.contains("offline mock")));
+        assert!(sheet.caveats.iter().any(|c| c.contains("built-in reader")));
+        assert!(sheet.caveats.iter().chain(sheet.steps.iter().map(|s| &s.summary)).all(|c| !c.contains("_KEY") && !c.contains("mock")), "no dev words for the public");
         // Synthetic heights are not Vexcel, so no photo was fetched.
         assert!(sheet.spots.iter().all(|s| s.photo_url.is_none()));
         // the search rides along, for the map and re-weighting
