@@ -162,7 +162,7 @@ const REAL={
   TZ=br.tz;AREA=br.area;$('#date').value=br.date;
   return{spots:sh.spots.map(spotUI),sun_path:[],call_sheet_text:sheetText(sh),call_sheet:sh}},
  async '/api/sun'(p){return(await getJ('/api/sun',{lat:p.lat,lon:p.lon,date:p.date,tz:TZ,step_min:5})).points},
- async '/api/spot/horizon'(p){const r=await getJ('/api/horizon',{lat:p.lat,lon:p.lon,above_m:1.7,radius_m:700,step_deg:1});return r.points.map(q=>({az_deg:q.az_deg,elev_deg:q.elev_deg}))},
+ async '/api/spot/horizon'(p){const r=await getJ('/api/horizon',{lat:p.lat,lon:p.lon,above_m:1.7,step_deg:1});return r.points.map(q=>({az_deg:q.az_deg,elev_deg:q.elev_deg}))},
  async '/api/scene'(p){const m=await getJ('/api/scene',{lat:p.lat,lon:p.lon,radius_m:500,detail:'phone'}),buf=new DataView(await (await raw(m.data_url)).arrayBuffer());
   // ring 1 (4 m cells, ~1 km across) shows the towers that matter; ring 0 alone is only ~250 m
   const ring=m.rings.find(r=>r.cell_m>=2)||m.rings[m.rings.length-1],n=ring.width,hs=new Array(n*n);
