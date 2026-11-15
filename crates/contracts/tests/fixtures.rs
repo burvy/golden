@@ -122,6 +122,29 @@ fn call_sheet() {
     assert!(c.access.iter().all(|a| roof_ids.contains(&&a.building_id)), "access only for sheet buildings");
 }
 
+#[test]
+fn chat_request() {
+    let r: ChatRequest = load("chat_request.json");
+    assert_eq!(r.messages[0].role, ChatRole::User, "the user speaks first");
+    let minimal: ChatRequest = serde_json::from_str(r#"{"messages":[{"role":"user","text":"sunset"}]}"#).unwrap();
+    assert_eq!((minimal.area, minimal.date, minimal.tz.as_str(), minimal.go), (None, None, "America/Los_Angeles", false));
+}
+
+#[test]
+fn chat_reply() {
+    let r: ChatReply = load("chat_reply.json");
+    assert!(r.ask.is_some() && r.brief.is_none() && r.sheet.is_none(), "a question, or a search, never both");
+    // the done form: the brief it settled on plus the call sheet
+    let sheet: CallSheet = load("call_sheet.json");
+    let mut brief = sheet.brief.clone();
+    brief.goals = vec![Goal::using("sun_between"), serde_json::from_str(r#"{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"kind":"tower"}}}"#).unwrap()];
+    let note = Some("I can't place the fountain yet; searching for the sunset part.".to_string());
+    let done = ChatReply { understood: vec!["fountain in front of a tower (not checked yet)".into()], ask: None, brief: Some(brief), sheet: Some(sheet), model: "mock".into(), note };
+    let back: ChatReply = serde_json::from_str(&serde_json::to_string(&done).unwrap()).unwrap();
+    assert_eq!(back, done);
+    assert!(!serde_json::to_string(&r).unwrap().contains("note"), "no note: left out");
+}
+
 // ---- goals (docs/metrics.md v2) -------------------------------------------------------------
 
 #[test]
