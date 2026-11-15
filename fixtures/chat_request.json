@@ -1,0 +1,11 @@
+{
+  "messages": [
+    { "role": "user", "text": "fountain in front of a tower at sunset" },
+    { "role": "agent", "text": "Where should we look?" },
+    { "role": "user", "text": "Downtown LA" }
+  ],
+  "area": null,
+  "date": null,
+  "tz": "America/Los_Angeles",
+  "go": false
+}
