@@ -10,14 +10,15 @@
 //!
 //! The settled brief carries `goals` (docs/contracts.md#goals-and-cost-functions) alongside the old fields:
 //! the sun goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`, what an empty `goals`
-//! means anyway), plus object goals as data with kinds in the user's words ("fountain in front of a tower" ->
-//! `{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`).
+//! means anyway), plus object goals as data: each object word becomes one of `OBJECT_KINDS` when it names one
+//! ("tower" -> "building", see `object_kind`), else stays in the user's words ("fountain in front of a tower" ->
+//! `{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "building"}}}`).
 //! The search only gets the goals the seed library can score (sun_* since 051; objects come with 052). For the
 //! rest the chat says so plainly (`note`), marks them "(not checked yet)", and tells the sheet writer not to
 //! claim them.
 
 use super::*;
-use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal, GoalFn, ObjRef};
+use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal, GoalFn, ObjRef, OBJECT_KINDS};
 
 /// The most questions the agent asks before it searches with its defaults.
 pub const MAX_ASKS: usize = 3;
@@ -198,10 +199,11 @@ fn user_text(m: &[ChatMessage]) -> String {
 }
 
 /// Pure: the goals for a settled brief: the sun goal for its framing, then one goal per object relation, its
-/// objects as kinds in the user's words. Names follow the seed library (sun_* from 051, objects from 052).
+/// objects as `OBJECT_KINDS` where the word names one, else in the user's words (those never bind, so they stay
+/// "not checked yet"). Names follow the seed library (sun_* from 051, objects from 052).
 fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
     let sun = golden_core::library::sun_goal_name(b.framing);
-    let kind = |k: &str| ObjRef::Kind { kind: k.to_string(), near: None, within_m: None };
+    let kind = |k: &str| ObjRef::Kind { kind: object_kind(k).map_or_else(|| k.to_string(), str::to_string), near: None, within_m: None };
     let objects = rels.iter().map(|r| {
         let mut g = Goal::using(r.relation.name());
         if let GoalFn::Use { args, .. } = &mut g.cost {
@@ -211,6 +213,28 @@ fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
         g
     });
     std::iter::once(Goal::using(sun)).chain(objects).collect()
+}
+
+/// Words for things that are one of `OBJECT_KINDS` (besides the kinds themselves).
+const KIND_WORDS: [(&str, &str); 24] = [
+    ("tower", "building"), ("skyscraper", "building"), ("high-rise", "building"), ("highrise", "building"),
+    ("office", "building"), ("condo", "building"), ("apartment", "building"), ("block", "building"),
+    ("palm", "tree"), ("palm tree", "tree"), ("oak", "tree"), ("pine", "tree"), ("cypress", "tree"),
+    ("vehicle", "car"), ("taxi", "car"), ("truck", "car"),
+    ("hvac", "rooftop HVAC unit"), ("hvac unit", "rooftop HVAC unit"), ("ac unit", "rooftop HVAC unit"),
+    ("pool", "swimming pool"), ("watertower", "water tower"), ("water tank", "water tower"),
+    ("rooftop hvac", "rooftop HVAC unit"), ("cooling unit", "rooftop HVAC unit"),
+];
+
+/// Pure: the `OBJECT_KINDS` kind a user's object word names ("Towers" -> "building", "water tower" -> itself),
+/// or None if it names none ("fountain", "statue").
+fn object_kind(word: &str) -> Option<&'static str> {
+    let w = word.trim().to_lowercase();
+    let w = w.split_whitespace().collect::<Vec<_>>().join(" ");
+    let find = |w: &str| {
+        OBJECT_KINDS.iter().find(|k| k.to_lowercase() == w).copied().or_else(|| KIND_WORDS.iter().find(|(x, _)| *x == w).map(|(_, k)| *k))
+    };
+    find(&w).or_else(|| w.strip_suffix('s').and_then(find)).or_else(|| w.strip_suffix("es").and_then(find))
 }
 
 /// Pure: can the search score this goal in `area` (a known cost function, the right args, a valid expression,
@@ -441,8 +465,9 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
          date = YYYY-MM-DD if a day is implied (\"late June\" = the 24th of the next June), else \"\"; event, standing, framing \
          (your best guess); known = the fields the filmmaker actually said or clearly implied (NOT your guesses); \
          objects = things they want in the shot placed relative to each other (\"a fountain in front of a tower\" = \
-         {{relation: in_front, a: fountain, b: tower}}; lined_up = one stacked on the other; beside = side by side), each \
-         object one short noun in their words, never the sun (that's framing), [] if none.\n\
+         {{relation: in_front, a: fountain, b: building}}; lined_up = one stacked on the other; beside = side by side), each \
+         object one of {OBJECT_KINDS:?} when it is one (a tower or skyscraper is a building, a palm is a tree), else one \
+         short noun in their words; never the sun (that's framing), [] if none.\n\
          Then either ask ONE short, friendly question (under 15 words) about the most important unknown, or set ready = true.\n\
          Rules: never ask about something already answered. You have asked {asked} of at most {MAX_ASKS} questions. \
          Ask only what changes where they should stand: the place first if unknown, then how the sun sits in the frame, then roof or street. \
@@ -652,11 +677,50 @@ mod tests {
         assert_eq!(goals_for(&b, &[])[0].name(), "sun_behind");
         b.framing = Framing::Clear;
         assert_eq!(goals_for(&b, &[])[0].name(), "sun_clear");
-        // object goals follow, as data, kinds in the user's words
+        // object goals follow, as data: OBJECT_KINDS where the word names one, else the user's word
         assert_eq!(
             serde_json::to_value(goals_for(&b, &read_rels("fountain in front of a tower at sunset"))).unwrap(),
-            json!([{"use": "sun_clear"}, {"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}])
+            json!([{"use": "sun_clear"}, {"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "building"}}}])
         );
+    }
+
+    #[test]
+    fn object_words_map_onto_object_kinds() {
+        assert_eq!(object_kind("tower"), Some("building"));
+        assert_eq!(object_kind(" Skyscrapers "), Some("building"));
+        assert_eq!(object_kind("palm  tree"), Some("tree"));
+        assert_eq!(object_kind("Trees"), Some("tree"));
+        assert_eq!(object_kind("water tower"), Some("water tower"), "not a building");
+        assert_eq!(object_kind("pools"), Some("swimming pool"));
+        assert_eq!(object_kind("buses"), None);
+        for k in OBJECT_KINDS {
+            assert_eq!(object_kind(k), Some(*k));
+        }
+        for (_, k) in KIND_WORDS {
+            assert!(OBJECT_KINDS.contains(&k), "{k} isn't an object kind");
+        }
+        // no kind: stays unmapped, and the goal keeps the user's word
+        assert_eq!(object_kind("fountain"), None);
+        assert_eq!(object_kind("statue"), None);
+    }
+
+    #[test]
+    fn unmapped_words_stay_unchecked_in_the_users_words() {
+        let lib = golden_core::library::seeds();
+        let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15"})).unwrap();
+        let rels = read_rels("fountain in front of a tower");
+        let g = goals_for(&b, &rels);
+        let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
+            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
+        };
+        // a source only knows OBJECT_KINDS: the tower binds as a building, the fountain never does
+        let objects = [obj("t:1", "tree", 0.0005), obj("t:2", "building", 0.001)];
+        let inputs = golden_core::search::Inputs { library: &lib, objects: &objects };
+        assert!(!checkable(&g[1], &inputs, &b.area));
+        let tree_first = goals_for(&b, &read_rels("tree in front of a tower"));
+        assert!(checkable(&tree_first[1], &inputs, &b.area), "tree + tower->building bind");
+        // the caveat keeps the user's words
+        assert_eq!(cant_check_note(&rels, Event::Sunset).unwrap(), "I can't place the fountain or the tower yet; searching for the sunset part.");
     }
 
     #[test]
@@ -675,7 +739,7 @@ mod tests {
         let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
             id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
         };
-        let objects = [obj("t:1", "fountain", 0.0005), obj("t:2", "tower", 0.001)];
+        let objects = [obj("t:1", "fountain", 0.0005), obj("t:2", "building", 0.001)];
         assert!(checkable(&g[1], &golden_core::search::Inputs { library: &lib, objects: &objects }, &b.area));
     }
 
