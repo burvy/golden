@@ -126,6 +126,7 @@ async function searchAgain(brief, why, opts = {}) {
   S.searching = false; setBusy(null);
 }
 function setBusy(why) {
+  if (why && viewTab !== 'map') setTab('map');
   $('#busy').hidden = !why; $('#busy').textContent = why || '';
   document.querySelectorAll('[data-needs-server]').forEach(b => (b.disabled = !!why));
 }
@@ -254,11 +255,10 @@ function drawMap() {
 
 // ---------------------------------------------------------------- spot card
 const clock = iso => { const m = /T(\d\d):(\d\d)/.exec(iso || ''); if (!m) return ''; const h = +m[1]; return `${h % 12 || 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`; };
-let mediaTab = 'photo';
 function renderSpot() {
   const el = $('#spot'), p = S.picks[S.sel];
   el.hidden = false;
-  if (!p) { el.innerHTML = '<div class="sp-head"><div class="sp-title"><h2>No spot passes every must</h2><p>Untick a must, or remove one, to let points back in.</p></div></div>'; return; }
+  if (!p) { showView(); el.innerHTML = '<div class="sp-head"><div class="sp-title"><h2>No spot passes every must</h2><p>Untick a must, or remove one, to let points back in.</p></div></div>'; return; }
   const sp = p.spot, r = S.result, inv = sp?.investigation;
   const roofUp = sp && sp.standing === 'roof' ? (sp.why.find(w => /^Roof \d+ m/.test(w)) || 'On a roof') : null;
   const sun = sp?.sun, when = sun ? [sun.hidden_at ? `sun behind the skyline at ${clock(sun.hidden_at)}` : 'sun clear to the horizon', sun.flat_sunset ? `sunset ${clock(sun.flat_sunset)}` : ''].filter(Boolean).join(', ') : '';
@@ -268,35 +268,40 @@ function renderSpot() {
     <div class="sp-head">
       <div class="sp-rank" role="tablist" aria-label="Top spots">${S.picks.map((q, n) => `<button role="tab" aria-pressed="${n === S.sel}" aria-label="Spot ${n + 1}${q.spot ? '' : ', new'}" class="${q.spot ? '' : 'new'}">${n + 1}</button>`).join('')}</div>
       <div class="sp-title"><h2>${esc(sp ? (roofUp || 'At street level') : 'New after your edit')}</h2>
-        <p>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${when ? `. ${esc(when.replace(/^./, c => c.toUpperCase()))}, ${sun.golden_min_visible} min of golden hour in view.` : '.'}</p></div>
+        <p>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${when ? `. ${esc(when.replace(/^./, c => c.toUpperCase()))}, ${sun.golden_min_visible} min of golden hour in view.` : '.'}${sp ? '' : ' No sun times yet: press <b>Check the new ones</b> above to get them.'}</p></div>
       <div class="sp-score"><span class="num">${fit}</span><br><small>fit, of 100</small></div>
     </div>
     <div class="sp-body">
-      <div class="sp-why">
-        <ul class="reasons">${live.map(k => { const g = S.goals[k], v = r.layers[k].heat.values[p.i] ?? 0, why = sp?.scores?.[k]?.why; const w = goalWords(k); return `
-          <li style="--c:${COLORS[k % COLORS.length]}"><span class="gname"><i></i>${esc(w.title)}${g.must ? ' <em>must, passes</em>' : ` <em>weight ${g.weight.toFixed(1)}</em>`}</span>
-          <span class="bar"><b style="width:${Math.round(v * 100)}%"></b></span><span class="v">${Math.round(v * 100)}</span>
-          <span class="w">${esc(why ? why.replace(/^[^:]*:\s*/, '') : w.about)}</span></li>`; }).join('')}</ul>
-        <div class="ai">${inv
-          ? `<h3>What the AI saw in the photos <span class="verdict ${inv.verdict}">${esc(VERDICT[inv.verdict] || inv.verdict)}</span></h3><p>${esc(inv.note)}</p>`
-          : sp ? `<h3>Not looked at by the AI <span class="verdict none">numbers only</span></h3><p>The scores come from the height map. The AI looks at the top few in aerial photos when it plans the shoot.</p>`
-          : `<h3>New after your edit <span class="verdict none">no sun times yet</span></h3><p>This point moved into the top ${S.K} when you changed a goal. Its goal scores above are the server’s; search again to get its exact sun times and reasons.</p><button type="button" id="checkone" data-needs-server>Get its sun times</button>`}</div>
-      </div>
       <div class="sp-media">
-        <div class="sp-tabs" role="tablist"><button role="tab" data-t="photo" aria-selected="${mediaTab === 'photo'}">Photo</button><button role="tab" data-t="3d" aria-selected="${mediaTab === '3d'}">3D view</button></div>
-        <div class="view" id="view"></div>
+        ${inv ? `<div class="ai" style="margin:10px 12px 0"><h3>What the AI saw in the photos <span class="verdict ${inv.verdict}">${esc(VERDICT[inv.verdict] || inv.verdict)}</span></h3><p>${esc(inv.note)}</p></div>` : ''}
         <ul class="calls">${sp?.building_id ? `<li><span>On building <b>${esc(sp.building_id)}</b></span><span class="mute">roof access needed</span></li>` : ''}
           <li><span class="mute">${esc(r.brief.date)}, ${r.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}. <a href="https://www.google.com/maps/dir/?api=1&amp;destination=${+p.lat},${+p.lon}" target="_blank" rel="noopener">Directions</a></span></li></ul>
       </div>
     </div>`;
   el.querySelectorAll('.sp-rank button').forEach((b, n) => (b.onclick = () => { S.sel = n; renderSpot(); drawMap(); }));
-  el.querySelectorAll('.sp-tabs button').forEach(b => (b.onclick = () => { mediaTab = b.dataset.t; renderSpot(); }));
-  const one = $('#checkone'); if (one) one.onclick = checkNew;
   setBusy(S.searching ? $('#busy').textContent : null);
+  showView();
+}
+let viewTab = 'map', shown = '';
+function setTab(t) { viewTab = t; showView(); }
+document.querySelectorAll('.vtabs button').forEach(b => (b.onclick = () => setTab(b.dataset.t)));
+// Map, or the photo / 3D view of the selected spot, in the same box. Reloads only when the tab or the spot changes.
+function showView() {
+  const p = S.picks[S.sel];
+  if (!p && viewTab !== 'map') viewTab = 'map';
+  document.querySelectorAll('.vtabs button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.t === viewTab)); if (b.dataset.t !== 'map') b.disabled = !p; });
+  $('#vspot').textContent = p && viewTab !== 'map' ? `Spot ${S.sel + 1}, looking toward the ${S.result.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}` : '';
+  const onMap = viewTab === 'map';
+  $('.mapwrap').hidden = !onMap; $('#view').hidden = onMap;
+  const key = onMap ? 'map' : `${viewTab} ${p.lat} ${p.lon}`;
+  if (key === shown) return;
+  shown = key;
+  if (onMap) { if (view3d) { try { view3d.dispose?.(); } catch (_) {} view3d = null; } $('#view').innerHTML = ''; drawMap(); return; }
   media(p);
 }
 let view3d = null;
 async function media(p) {
+  const mediaTab = viewTab;
   const v = $('#view'), az = p.spot?.sun?.hidden_az_deg ?? (S.result.brief.event === 'sunrise' ? 115 : 246);
   if (view3d) { try { view3d.dispose?.(); } catch (_) {} view3d = null; }
   if (mediaTab === 'photo') {
@@ -304,7 +309,7 @@ async function media(p) {
     try {
       const r = await fetch(`${BASE}/api/photo?lat=${p.lat}&lon=${p.lon}&look_az_deg=${Math.round(az)}&radius_m=150&max_px=1024`);
       if (!r.ok) throw 0; const m = await r.json();
-      if (S.picks[S.sel] !== p || mediaTab !== 'photo') return;
+      if (S.picks[S.sel] !== p || viewTab !== 'photo') return;
       v.innerHTML = `<img alt="Aerial photo looking toward the ${S.result.brief.event} from spot ${S.sel + 1}" src="${esc(BASE + m.image_url)}">`;
     } catch (_) { if (S.picks[S.sel] === p) v.innerHTML = '<div class="ph">No aerial photo here: golden’s server isn’t reachable, or has none cached for this spot.</div>'; }
   } else {
@@ -312,7 +317,7 @@ async function media(p) {
     try {
       const at = await fetch(`${BASE}/api/mesh/at?lat=${p.lat}&lon=${p.lon}`).then(r => (r.ok ? r.json() : Promise.reject()));
       const m = await import('../../js/meshview.js');
-      if (S.picks[S.sel] !== p || mediaTab !== '3d') return;
+      if (S.picks[S.sel] !== p || viewTab !== '3d') return;
       v.innerHTML = '';
       view3d = await m.create({ host: v, base: BASE, lat: p.lat, lon: p.lon, yaw: az, tilesetUrl: at.tileset_url, attribution: at.attribution, onStatus: () => {} });
     } catch (_) { if (S.picks[S.sel] === p) v.innerHTML = '<div class="ph">No 3D view here: golden’s server isn’t reachable, or has no mesh for this spot.</div>'; }
