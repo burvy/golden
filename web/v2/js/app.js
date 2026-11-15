@@ -15,6 +15,8 @@ const BASE = (() => { const a = params.get('api'); if (a && /^\/(?!\/)/.test(a))
   return location.protocol.startsWith('http') ? location.origin : 'http://localhost:8787'; })();
 const MODE = { fixture: params.get('data') === 'fixture' };
 const data = createData(BASE, MODE);
+// the old page lives on at classic/; it takes the same ?api= base (burvy.dev's iframe)
+document.getElementById('classic').href = 'classic/' + (params.get('api') ? '?api=' + encodeURIComponent(params.get('api')) : '');
 const COLORS = ['--g1', '--g2', '--g3', '--g4', '--g5', '--g6'].map(v => getComputedStyle(document.documentElement).getPropertyValue(v).trim());
 const ICON = {
   eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
