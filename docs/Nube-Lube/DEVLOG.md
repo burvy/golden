@@ -233,3 +233,18 @@ Not done / for others:
 - "fountain" isn't in contracts::OBJECT_KINDS: adding it is a one-line contracts PR (with a detection check).
 - trial.rs should move into core as `search::sample` (pure); raised for burvy.
 - Detection may be billed separately by Vexcel (probe caveat); boxes are cached and capped, untested above 150 m.
+
+## 11/15/26: Map, Photo and 3D view as tabs in one box (branch `web/view-tabs`)
+
+The 3D view was a small box in the right half of the spot card, next to the per-goal score list. For the demo
+video it needs to be big. What changed (web/index.html, web/v2/js/app.js):
+- The map box has three tabs: Map (default, the heat map with the top 3 pins), Photo and 3D view of the
+  selected spot. Photo and 3D take the map's place at the map's size. The 1/2/3 buttons and the map pins
+  pick the spot; the view only reloads when the tab or the spot changes, so moving a weight slider no
+  longer rebuilds the 3D scene. A search in progress switches back to Map so its progress shows.
+- The spot card lost its left column (per-goal scores and the "Not looked at by the AI / numbers only" box).
+  It keeps the ranks, title, fit, the AI's photo note when there is one, and Directions.
+- A spot that moved into the top 3 after an edit still says it has no sun times yet, now as one line under
+  the title pointing at "Check the new ones" (the old box and its button are gone).
+- int-test.mjs looks for that line in `.sp-title`; all 21 checks pass (fixture and live, Edge, 1440x900).
+- Not checked yet: phone width (the box is 62% of the screen height there).

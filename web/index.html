@@ -78,6 +78,11 @@ main>section,main>aside{min-height:0;overflow:auto}
 #funnel.flash .num{animation:fl .5s ease}
 @keyframes fl{from{opacity:.35;transform:translateY(3px)}}
 
+.vtabs{display:flex;gap:4px;margin-bottom:-6px}
+.vtabs button{border:1px solid var(--line);background:var(--bg2);border-radius:8px;padding:5px 14px;font-weight:600;font-size:14px;min-height:36px}
+.vtabs button[aria-selected=true]{background:var(--sky-deep);border-color:var(--sky-deep);color:#fff}
+.vtabs .vspot{margin-left:auto;align-self:center;font-size:13px;color:var(--mute)}
+.mapwrap[hidden]{display:none}
 .mapwrap{position:relative;border-radius:14px;overflow:hidden;background:#dbe9f4;border:1px solid var(--line)}
 #map{display:block;width:100%;height:clamp(320px,52vh,560px);touch-action:pan-y;cursor:grab}
 #layers{position:absolute;left:12px;top:12px;display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 76px)}
@@ -122,7 +127,7 @@ main>section,main>aside{min-height:0;overflow:auto}
 .sp-score{margin-left:auto;text-align:right}
 .sp-score .num{font-size:30px;font-weight:800;color:var(--sun-ink);line-height:1}
 .sp-score small{color:var(--mute);font-size:12px}
-.sp-body{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+.sp-body{display:block}
 .sp-why{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .reasons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
 .reasons li{display:grid;grid-template-columns:1fr 46px;gap:2px 10px;align-items:center}
@@ -139,11 +144,12 @@ main>section,main>aside{min-height:0;overflow:auto}
 .verdict{font:600 12px "Instrument Sans",sans-serif;border-radius:99px;padding:1px 8px;background:var(--sun);color:var(--on-sun)}
 .verdict.caution,.verdict.moved_down{background:#ffd8a8}.verdict.ruled_out{background:#e8d6d6;color:#6b2020}.verdict.none{background:var(--tint);color:var(--mute)}
 .ai button{margin-top:8px;border:1px solid var(--sun);background:#fff;color:var(--sun-ink);border-radius:8px;padding:6px 10px;font-weight:600}
-.sp-media{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+.sp-media{display:flex;flex-direction:column;min-width:0}
 .sp-tabs{display:flex;gap:4px;padding:10px 12px 0}
 .sp-tabs button{border:1px solid var(--line);background:var(--bg2);border-radius:8px;padding:5px 12px;font-weight:600;font-size:14px;min-height:36px}
 .sp-tabs button[aria-selected=true]{background:var(--sky-deep);border-color:var(--sky-deep);color:#fff}
-.view{margin:10px 12px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#a9cdea,#f7c99a);aspect-ratio:4/3;position:relative}
+.view{border-radius:14px;overflow:hidden;background:linear-gradient(180deg,#a9cdea,#f7c99a);border:1px solid var(--line);height:clamp(320px,52vh,560px);position:relative}
+.view[hidden]{display:none}
 .view img{width:100%;height:100%;object-fit:cover;display:block}
 .view .ph{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:14px;color:var(--ink);font-size:14px}
 .view canvas{display:block}
@@ -210,7 +216,7 @@ button[disabled]{opacity:.55;cursor:default}
  #layers{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;max-width:calc(100% - 70px)}#layers button{flex:none}
  .wide{display:none}
  #legend{max-width:calc(100% - 24px)}
- .sp-body{grid-template-columns:1fr}.sp-media{border-left:0;border-top:1px solid var(--line)}
+ .view{height:62vh;height:62svh}
  .sp-head{flex-wrap:wrap}.sp-rank{order:3;width:100%}.sp-rank button{width:44px;height:44px}
  .ib{width:44px;height:44px}
 }
@@ -232,6 +238,10 @@ button[disabled]{opacity:.55;cursor:default}
 
   <section id="stage" aria-label="Results">
     <div id="funnel" aria-label="How the points were cut down"></div>
+    <div class="vtabs" role="tablist" aria-label="View">
+      <button role="tab" data-t="map" aria-selected="true">Map</button><button role="tab" data-t="photo" aria-selected="false" disabled>Photo</button><button role="tab" data-t="3d" aria-selected="false" disabled>3D view</button>
+      <span class="vspot" id="vspot"></span>
+    </div>
     <div class="mapwrap">
       <canvas id="map" aria-label="Map of candidate points, coloured by score"></canvas>
       <div id="layers" role="toolbar" aria-label="Map layer"></div>
@@ -242,6 +252,7 @@ button[disabled]{opacity:.55;cursor:default}
       <div class="attrib" id="attrib"></div>
       <div class="empty" id="mapempty"><p>The map fills in once the brief is clear: every point I can stand on, coloured by how well it fits.</p></div>
     </div>
+    <div class="view" id="view" hidden></div>
     <div id="toast" role="status" hidden></div>
     <article id="spot" hidden aria-label="Selected spot"></article>
   </section>
@@ -255,5 +266,5 @@ button[disabled]{opacity:.55;cursor:default}
     <form id="say"><label class="sr" for="msg">Message</label><textarea id="msg" rows="1" placeholder="Describe the shot"></textarea><button>Send</button></form>
   </section>
 </main>
-<script type="module" src="v2/js/app.js"></script>
+<script type="module" src="v2/js/app.js?v=view-tabs"></script>
 </body></html>

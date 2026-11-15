@@ -27,7 +27,7 @@ const coord = p => p.evaluate(() => document.querySelector('.sp-title p')?.textC
   ok(await p.locator('#checknew').isVisible(), '"Check the new ones" offered');
   ok(await p.locator('.goal.gone', { hasText: 'Up high' }).isVisible(), 'removed goal listed with undo');
   await p.locator('.sp-rank button.new').first().click(); await p.waitForTimeout(200);
-  ok(await p.locator('.ai', { hasText: 'no sun times yet' }).isVisible(), 'new spot says it has no sun times yet');
+  ok(await p.locator('.sp-title', { hasText: /no sun times yet/i }).isVisible(), 'new spot says it has no sun times yet');
   await p.click('#checknew'); await p.waitForTimeout(300);
   ok(await p.locator('#toast.err').isVisible(), 'fixture mode explains search needs the server: ' + await p.locator('#toast').textContent());
   await p.click('#resetgoals'); await p.waitForTimeout(200);
