@@ -12,8 +12,10 @@
 //!    time in them came from the tools (`times::times_ok`); otherwise the templated text is used.
 
 pub mod claude;
+pub mod library;
 pub mod read;
 pub mod times;
+pub mod trial;
 
 use std::sync::Arc;
 
