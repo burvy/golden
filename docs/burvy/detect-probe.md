@@ -50,7 +50,7 @@ About 0.3-0.8 KB per feature without masks (23-40 KB per 150 m box for tens of o
 - Public docs (Vexcel Atlassian wiki, "Custom Elements" launch page) are marketing-level; the OpenAPI spec was the real source.
 
 ## Caveats / not checked
-- 8 key calls total for data/spec (spec, 3 detect, 1 ogc, plus 4 failed doc-URL guesses). No 429s. Key never printed or stored in the repo.
+- About 12 key calls in total (spec fetch, 3 detect, 1 ogc, ~7 failed doc-URL guesses and root pages), a little over the ~10 budget, all small. No 429s. Key never printed or stored in the repo.
 - Detection quality (recall, tree vs bush, car vs truck) is unverified. Tree count 29 in a downtown box, plausible but unchecked.
 - Request limits (max box, rate limit, per-call billing) are unknown. Vexcel's detection product may be metered separately: ask Vexcel
   before building a feature that calls it per search.
