@@ -1,0 +1,164 @@
+{
+  "name": "skyline_glow_at_sunrise",
+  "about": "The rising sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 195-15 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'morning glow on both towers (lab: sunrise-skyline-glow)'",
+  "params": [
+    "a",
+    "b"
+  ],
+  "must": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "f": "in_frame",
+          "a": "a",
+          "b": "b"
+        },
+        "than": {
+          "num": 0
+        }
+      },
+      {
+        "op": "or",
+        "of": [
+          {
+            "op": "gt",
+            "x": {
+              "op": "bump",
+              "x": {
+                "f": "bearing",
+                "obj": "a"
+              },
+              "at": 285,
+              "width": 90
+            },
+            "than": {
+              "num": 0
+            }
+          },
+          {
+            "op": "gt",
+            "x": {
+              "op": "bump",
+              "x": {
+                "f": "bearing",
+                "obj": "a"
+              },
+              "at": 0,
+              "width": 15
+            },
+            "than": {
+              "num": 0
+            }
+          }
+        ]
+      },
+      {
+        "op": "or",
+        "of": [
+          {
+            "op": "gt",
+            "x": {
+              "op": "bump",
+              "x": {
+                "f": "bearing",
+                "obj": "b"
+              },
+              "at": 285,
+              "width": 90
+            },
+            "than": {
+              "num": 0
+            }
+          },
+          {
+            "op": "gt",
+            "x": {
+              "op": "bump",
+              "x": {
+                "f": "bearing",
+                "obj": "b"
+              },
+              "at": 0,
+              "width": 15
+            },
+            "than": {
+              "num": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "bump",
+        "x": {
+          "op": "max",
+          "of": [
+            {
+              "f": "sun_bearing_diff",
+              "obj": "a"
+            },
+            {
+              "op": "mul",
+              "of": [
+                {
+                  "f": "sun_bearing_diff",
+                  "obj": "a"
+                },
+                {
+                  "num": -1
+                }
+              ]
+            }
+          ]
+        },
+        "at": 180,
+        "width": 30
+      },
+      {
+        "op": "bump",
+        "x": {
+          "op": "max",
+          "of": [
+            {
+              "f": "sun_bearing_diff",
+              "obj": "b"
+            },
+            {
+              "op": "mul",
+              "of": [
+                {
+                  "f": "sun_bearing_diff",
+                  "obj": "b"
+                },
+                {
+                  "num": -1
+                }
+              ]
+            }
+          ]
+        },
+        "at": 180,
+        "width": 30
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      },
+      {
+        "f": "visible",
+        "obj": "b"
+      },
+      {
+        "f": "in_frame",
+        "a": "a",
+        "b": "b"
+      }
+    ]
+  }
+}

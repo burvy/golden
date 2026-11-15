@@ -193,7 +193,8 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
                 t
             }
             Err(e) => {
-                log.add("chat", format!("Claude couldn't follow the chat ({e}); using the offline reader"));
+                eprintln!("chat: Claude couldn't follow the chat: {e}");
+                log.add("chat", "Claude couldn't follow the chat; using the built-in reader");
                 mock_turn(&req, &text, today)
             }
         },
@@ -228,7 +229,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model, note: None });
     }
 
-    let by = if model == "mock" { "the offline reader".to_string() } else { model.clone() };
+    let by = if model == "mock" { "the built-in reader".to_string() } else { model.clone() };
     let qs = match asked {
         0 => "no questions".to_string(),
         1 => "1 question".to_string(),
@@ -538,7 +539,7 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
          (clear = open view of the sun, between = sun in a gap between buildings, behind = sun behind a building, silhouette).\n\
          Two shots have their own search: open_horizon = they want the sun right down to the horizon (an open view all \
          the way down); wide_gap = the sun framed by the skyline with room around it (a wide opening, not a narrow gap \
-         between two buildings). Set shot to one of these only if they ask for that shot, else \"none\".\n\
+         between two buildings). Set shot to one of these only if the filmmaker asks for that kind of shot; never pick one as a default. Otherwise shot = \"\".\n\
          Today is {} ({}). Places with data: {:?}.\n{area}\
          The conversation so far:\n{}\n\n\
          Return your reading: place = the place named (one of the listed places if it matches, else as written, \"\" if none); \
@@ -570,7 +571,7 @@ fn chat_schema() -> serde_json::Value {
             "event": { "type": "string", "enum": ["sunset", "sunrise"] },
             "standing": { "type": "string", "enum": ["roof", "ground", "any"] },
             "framing": { "type": "string", "enum": ["clear", "between", "behind"] },
-            "shot": { "type": "string", "enum": ["none", "open_horizon", "wide_gap"] },
+            "shot": { "type": "string", "enum": ["", "open_horizon", "wide_gap"] },
             "known": { "type": "array", "items": { "type": "string", "enum": ["place", "date", "event", "standing", "framing"] } },
             "ready": { "type": "boolean" },
             "question": { "type": "string" },
@@ -601,7 +602,7 @@ fn turn_from_model(text: &str, v: &serde_json::Value) -> Turn {
         choices: v["choices"].as_array().map(|a| a.iter().filter_map(|c| c.as_str()).map(str::trim).filter(|c| !c.is_empty()).take(4).map(str::to_string).collect()).unwrap_or_default(),
     });
     let rels = rels_from_model(&v["objects"]).unwrap_or_else(|| read_rels(text));
-    // "none" (or anything unknown) means no shot; a reply without the field falls back to the offline reader.
+    // "" (or anything unknown) means no shot; a reply without the field falls back to the offline reader.
     let shot = match v["shot"].as_str() {
         Some(_) => parse_enum(&v["shot"]),
         None => read_shot(text),
@@ -1085,8 +1086,8 @@ mod tests {
         let t = turn_from_model("sun framed by the skyline", &v);
         assert_eq!((t.shot, t.fields.framing), (Some(Shot::WideGap), Framing::Between));
         assert!(t.known.contains(&Topic::Framing));
-        let none = turn_from_model("the sun down to the horizon", &json!({"shot": "none"}));
-        assert_eq!(none.shot, None, "the model's \"none\" wins over the offline reader");
+        let none = turn_from_model("the sun down to the horizon", &json!({"shot": ""}));
+        assert_eq!(none.shot, None, "the model's \"\" wins over the offline reader");
         let missing = turn_from_model("the sun down to the horizon", &json!({}));
         assert_eq!(missing.shot, Some(Shot::OpenHorizon));
         let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15"})).unwrap();

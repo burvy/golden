@@ -1,0 +1,47 @@
+{
+  "name": "sun_keyhole",
+  "about": "The sun sets (or rises) through a keyhole: a slot only 1.5-3 deg wide between tall sides, in view in it to within 2 deg of the horizon. Roof or street. Sun only, no objects needed. For briefs like 'the sun through a narrow slot between buildings (lab: keyhole)'",
+  "must": {
+    "op": "gt",
+    "x": {
+      "f": "gap_width_deg"
+    },
+    "than": {
+      "num": 1
+    }
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "and",
+        "of": [
+          {
+            "op": "ramp",
+            "x": {
+              "f": "gap_width_deg"
+            },
+            "lo": 1,
+            "hi": 1.5
+          },
+          {
+            "op": "ramp",
+            "x": {
+              "f": "gap_width_deg"
+            },
+            "lo": 4,
+            "hi": 3
+          }
+        ]
+      },
+      {
+        "op": "ramp",
+        "x": {
+          "f": "sun_hidden_elev"
+        },
+        "lo": 6,
+        "hi": 2
+      }
+    ]
+  }
+}
