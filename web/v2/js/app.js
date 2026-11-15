@@ -289,7 +289,7 @@ function showView() {
   const p = S.picks[S.sel];
   if (!p && viewTab !== 'map') viewTab = 'map';
   document.querySelectorAll('.vtabs button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.t === viewTab)); if (b.dataset.t !== 'map') b.disabled = !p; });
-  $('#vspot').textContent = p && viewTab !== 'map' ? `Spot ${S.sel + 1}, looking toward the ${S.result.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}` : '';
+  $('#vspot').textContent = p && viewTab !== 'map' ? `Spot ${S.sel + 1}, looking toward the ${S.result.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}${viewTab === '3d' ? '. Click it, then WASD to fly, Q/E down/up, Shift faster, R back' : ''}` : '';
   const onMap = viewTab === 'map';
   $('.mapwrap').hidden = !onMap; $('#view').hidden = onMap;
   const key = onMap ? 'map' : `${viewTab} ${p.lat} ${p.lon}`;
@@ -315,7 +315,7 @@ async function media(p) {
     v.innerHTML = '<div class="ph">Loading the 3D view…</div>';
     try {
       const at = await fetch(`${BASE}/api/mesh/at?lat=${p.lat}&lon=${p.lon}`).then(r => (r.ok ? r.json() : Promise.reject()));
-      const m = await import('../../js/meshview.js');
+      const m = await import('../../js/meshview.js?v=fly');
       if (S.picks[S.sel] !== p || viewTab !== '3d') return;
       v.innerHTML = '';
       view3d = await m.create({ host: v, base: BASE, lat: p.lat, lon: p.lon, yaw: az, tilesetUrl: at.tileset_url, attribution: at.attribution, onStatus: () => {} });

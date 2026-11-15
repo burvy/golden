@@ -89,12 +89,12 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
   tiles.setResolutionFromRenderer(cam, renderer);
 
   // stand on whatever is under the spot (roof or street): ray down through the mesh, eye 1.7 m above it
-  let eyeFound = false, groundY = null;
+  let eyeFound = false, groundY = null, flown = false;
   cam.position.set(0, 250, 0);
   const ray = new THREE.Raycaster(new THREE.Vector3(0, 3000, 0), new THREE.Vector3(0, -1, 0));
   const findGround = () => {
     const hit = ray.intersectObject(tiles.group, true)[0];
-    if (hit) { groundY = hit.point.y; cam.position.y = groundY + 1.7; eyeFound = true; }
+    if (hit) { groundY = hit.point.y; if (!flown) cam.position.y = groundY + 1.7; eyeFound = true; }
   };
 
   let look = { yaw, pitch: 3, fov: 60 };
@@ -122,6 +122,32 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
       look.yaw -= (e.clientX - prev[0]) * k; look.pitch = clamp(look.pitch + (e.clientY - prev[1]) * k, -45, 60);
     }
   };
+  // fly: click the view, then WASD / arrows to move, Q/E (or Space/C) down/up, Shift faster, R back to the spot
+  el.tabIndex = 0; el.style.outline = 'none';
+  const keys = new Set();
+  el.addEventListener('pointerdown', () => el.focus({ preventScroll: true }));
+  el.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'r') { flown = false; cam.position.set(0, groundY != null ? groundY + 1.7 : 250, 0); look.yaw = yaw; look.pitch = 3; return; }
+    if ('wasdqec '.includes(k) || k.startsWith('arrow') || k === 'shift') { keys.add(k); e.preventDefault(); }
+  });
+  el.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+  el.addEventListener('blur', () => keys.clear());
+  let last = performance.now();
+  const fly = () => {
+    const now = performance.now(), dt = Math.min((now - last) / 1000, .1); last = now;
+    if (!keys.size) return;
+    const v = (keys.has('shift') ? 120 : 25) * dt, a = look.yaw * rad;
+    const f = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+    const r = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+    const u = (keys.has('e') || keys.has(' ') ? 1 : 0) - (keys.has('q') || keys.has('c') ? 1 : 0);
+    if (!f && !r && !u) return;
+    flown = true;
+    cam.position.x += (Math.sin(a) * f + Math.cos(a) * r) * v;
+    cam.position.z += (-Math.cos(a) * f + Math.sin(a) * r) * v;
+    cam.position.y += u * v;
+  };
+
   el.onwheel = e => { e.preventDefault(); look.fov = clamp(look.fov * (e.deltaY > 0 ? 1.08 : 1 / 1.08), 15, 80); };
 
   // render loop: 3D Tiles streams in finer tiles as you look around
@@ -131,6 +157,7 @@ export async function create({ host, base = '', lat, lon, yaw = 270, tilesetUrl,
     requestAnimationFrame(loop);
     if (!hostEl || !hostEl.isConnected) return;
     if (!eyeFound || frames++ % 30 === 0) findGround(); // refine as sharper tiles arrive
+    fly();
     aim();
     cam.updateMatrixWorld();
     tiles.update();
