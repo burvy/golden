@@ -14,7 +14,10 @@ contracts = { path = "../contracts" }
 serde_json = "1"
 
 [dev-dependencies]
-# Only for examples/search_la.rs (real LA heights). Core itself stays IO-free.
+# Only for the examples (search_la.rs: real LA heights; library_lab.rs: also CoStar buildings).
+# Core itself stays IO-free.
 vexcel = { path = "../vexcel" }
+costar = { path = "../costar" }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = "1"
