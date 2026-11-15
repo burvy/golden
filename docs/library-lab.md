@@ -5,9 +5,9 @@
 - **15 cost functions measured and kept**, all 15 in the search today.
 - **Recall kept: 100%.** Every one keeps all of the search's top 10 spots in every test: 18 places in
   downtown LA and Princeton, 3 days (Nov 14, Jun 21, Dec 21), up to 100 runs with spots per entry.
-- **They skip half the work or more.** 12 of them have a cheap check that drops a median 41-93% of
-  candidate standpoints before the skyline trace (the other 3 get theirs with task 065).
-  Example: "the sun setting down a street" traces 55,248 -> 27,282 skylines; search 1283 -> 626 ms.
+- **They skip half the work or more.** 11 of them have a cheap check that drops a median 41-93% of
+  candidate standpoints before the skyline trace (3 more get theirs with task 065).
+  Example: "the sun sets beside the tower" traces 55,248 -> 21,888 skylines; search 1219 -> 549 ms.
 - **Shots covered, sunset and sunrise:** sun alone (open horizon, wide gap, down the street, keyhole),
   one tower (sun beside or behind it, golden light on it, looking up at it), two towers (sun between
   them, the skyline glowing).
@@ -496,12 +496,20 @@ being the shot? These are sweeps of the brief, not gates.
 
 Two sun-only street shots. They need no objects, so they work in any area today.
 
-1. **`sun_down_the_street`, the first sun-only entry that saves time today.** The shot: at street level,
+1. **`sun_down_the_street`, a sun-only street shot.** The shot: at street level,
    the sun sets or rises down a street, into a 1.5-20 deg gap between the buildings on both sides, and
    stays in view to within 2 deg of the horizon (the "-henge" shot). Its must is "not on a roof", which
    is Point tier. So it drops street-level-impossible points before any trace, with no 065 needed:
    - 100% recall in 48 tested runs on 15 places (sunset and sunrise, 3 days).
    - A median 50% pruned (28-65%), skyline traces 55248 -> 27282, search 1283 -> 626 ms.
+   - **Correction (task 067):** that saving is only what "street level" already gives. Its must, "not
+     on a roof", is part of the shot, not implied by its score, and the scenario wrote "street" into
+     the goal, so the 100% recall comes for free. A brief that just asks for street level (standing
+     `ground`) skips the roofs before any trace anyway: 235 candidates in ~505 ms, the same as with
+     the must. Against its score alone it loses top spots (that's the roofs it rules out on purpose).
+     So it counts as a shot, not a speed gate. The other entries pass that stricter test (`--try`,
+     task 067): `sunset_beside`, `sunset_behind`, `sunset_between_two`, `tower_lit_at_sunset`,
+     `skyline_glow` and `towers_over` keep 100%.
    - Stacked with 065's 6-deg precheck (provably safe, since the score is 0 once the sun hides 6 deg
      up), the precheck alone would drop 78%.
    - It's rarer than it sounds: spots in 21 of 54 runs at sunset and 27 of 54 at sunrise (11 places),
@@ -535,7 +543,7 @@ averaged over all its runs, with and without it.
 |---|---|---|---|---|---|---|---|
 | 1 | `open_horizon` (seed since 070) | "an open view, the sun right down to the horizon", sunset or sunrise (`open-view`, `sunrise-open-view`) | **yes**, sun only | 95 of 108 (18) | none today (its must reads the skyline); 97% (66-100%) with 065 at 1 deg | 55248 -> 3144 with 065 | 1186 -> ~117 ms with 065 |
 | 2 | `sun_wide_gap` (seed since 070) | "the sun framed by the skyline, with room around it" (`wide-gap`, `sunrise-wide-gap`) | **yes**, sun only | 91 of 108 (18) | none today; 78% (38-97%) with 065 at 6 deg | 55248 -> 15341 with 065 | 1130 -> ~431 ms with 065 |
-| 3 | `sun_down_the_street` | "the sun setting (or rising) right down a street, buildings on both sides" (`down-the-street`, `sunrise-down-the-street`) | **yes**, sun only, and it saves time today | 48 of 108 (15) | 50% (28-65%), a Point must (street level); 78% with 065 at 6 deg | 55248 -> 27282 | 1283 -> 626 ms |
+| 3 | `sun_down_the_street` | "the sun setting (or rising) right down a street, buildings on both sides" (`down-the-street`, `sunrise-down-the-street`) | **yes**, sun only | 48 of 108 (15) | 50% vs a roof-or-street search, the same as asking for street level (see round 7, correction); 78% with 065 at 6 deg | 55248 -> 27282 | 1283 -> 626 ms |
 | 4 | `sun_keyhole` | "the sun through a narrow slot between buildings" (`keyhole`) | **yes**, sun only | 40 of 54 (16) | none today; 79% (38-97%) with 065 at 6 deg | 27624 -> 7520 with 065 | 1350 -> ~501 ms with 065 |
 | 5 | `sunset_behind` (seed since 070) | "silhouette: the sun drops behind the tower" (`silhouette`, `silhouette-tower2`) | yes, needs a building object | 67 of 108 (17) | 68% (6-100%) | 55248 -> 21888 | 1210 -> 523 ms |
 | 6 | `sunset_beside` (seed since 070) | "the sun sets beside the tower" (`sun-by-tower`, `sun-by-tower2`) | yes, needs a building object | 94 of 108 (18) | 68% (6-100%) | 55248 -> 21888 | 1219 -> 549 ms |
@@ -553,8 +561,8 @@ averaged over all its runs, with and without it.
 scenario writes the same must inline.)
 
 How it's ranked:
-1. The sun-only entries come first, because they work in any area, objects or not. `sun_down_the_street`
-   is the only one with a cheap must today.
+1. The sun-only entries come first, because they work in any area, objects or not. None has a cheap
+   speed gate today (`sun_down_the_street`'s must is "street level", part of the shot).
 2. Then the sunset object shots, by how common the brief is. "Beside" and "behind" are the hero
    shots.
 3. Then the sunrise mirrors.
