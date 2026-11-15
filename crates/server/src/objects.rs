@@ -8,7 +8,7 @@
 //! - The same thing found twice (two boxes, or CoStar and Vexcel) is kept once, CoStar first, then the more
 //!   confident detection. At most `MAX_PER_KIND` per kind, nearest the area's centre.
 
-use contracts::{Area, Building, DsmGrid, Object, OBJECT_KINDS};
+use contracts::{Area, Building, CostFn, DsmGrid, Goal, GoalFn, Object, OBJECT_KINDS};
 use golden_core::search::skyline_need_m;
 use vexcel::detect::Detection;
 
@@ -152,6 +152,7 @@ fn from_building(grid: &DsmGrid, b: &Building) -> Option<Object> {
         top_m: round1(top_m),
         radius_m: BUILDING_RADIUS_M,
         source: "costar".into(),
+        name: b.name.clone(),
     })
 }
 
@@ -168,6 +169,7 @@ fn from_detection(grid: &DsmGrid, d: &Detection) -> Option<Object> {
         top_m: round1(top_m),
         radius_m: round1(radius_m),
         source: "vexcel".into(),
+        name: None,
     })
 }
 
@@ -201,6 +203,71 @@ pub fn base_and_top(grid: &DsmGrid, lat: f64, lon: f64, radius_m: f64) -> Option
     (base.is_finite() && top.is_finite()).then_some((base, top.max(base)))
 }
 
+/// The Vexcel key for live detection: from the environment, never in tests (cache only there, so a key in
+/// the environment can't make a test call Vexcel).
+pub fn live_key() -> Option<vexcel::auth::ApiKey> {
+    if cfg!(test) {
+        None
+    } else {
+        vexcel::auth::ApiKey::from_env().ok()
+    }
+}
+
+/// Pure: the object kinds `goals` name, as `OBJECT_KINDS` spells them, in order of first mention: every
+/// `"kind"` in their args or inline expressions, and in the library functions they `use`. Words that aren't
+/// a kind are left out (those goals stay unbound, and the chat says so).
+pub fn kinds_in(goals: &[Goal], library: &[CostFn]) -> Vec<String> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if let Some(k) = m.get("kind").and_then(|k| k.as_str()) {
+                    if let Some(known) = OBJECT_KINDS.iter().find(|o| o.eq_ignore_ascii_case(k.trim())) {
+                        if !out.iter().any(|o| o == known) {
+                            out.push(known.to_string());
+                        }
+                    }
+                }
+                m.values().for_each(|x| walk(x, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for g in goals {
+        walk(&serde_json::to_value(g).unwrap_or_default(), &mut out);
+        if let GoalFn::Use { name, .. } = &g.cost {
+            if let Some(f) = library.iter().find(|f| &f.name == name) {
+                walk(&serde_json::to_value(f).unwrap_or_default(), &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// The objects `goals` can mean in `area` (none if they name no kind, so a sun-only brief costs nothing).
+/// At most `MAX_KINDS` kinds. Detection answers come from the disk cache, else live with `live_key()`; a
+/// failure is logged and leaves the list empty, so those goals stay "not checked".
+pub async fn for_goals(st: &AppState, area: &Area, goals: &[Goal], library: &[CostFn]) -> Vec<Object> {
+    let mut kinds = kinds_in(goals, library);
+    if kinds.is_empty() {
+        return Vec::new();
+    }
+    kinds.truncate(MAX_KINDS);
+    match find_objects(st, area, &kinds, live_key()).await {
+        Ok(f) => {
+            for n in &f.notes {
+                eprintln!("objects: {n}");
+            }
+            f.objects
+        }
+        Err(e) => {
+            eprintln!("objects: none for the goals ({})", e.1);
+            Vec::new()
+        }
+    }
+}
+
 fn metres(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     costar::distance_m(lat1, lon1, lat2, lon2)
 }
@@ -217,7 +284,7 @@ mod tests {
     const SAMPLE: &str = include_str!("../../../fixtures/vexcel_detect_sample.json");
 
     fn area(lat: f64, lon: f64, r: f64) -> Area {
-        Area { lat, lon, radius_m: r }
+        Area { lat, lon, radius_m: r, name: None }
     }
 
     fn building(id: &str, lat: f64, lon: f64, height_m: Option<f64>) -> Building {
@@ -249,6 +316,19 @@ mod tests {
         let e = check_kinds(&["fountain".into()]).unwrap_err();
         assert!(e.contains("unknown kind \"fountain\"") && e.contains("water tower"), "{e}");
         assert!(check_kinds(&[]).is_err());
+    }
+
+    #[test]
+    fn the_kinds_a_brief_names() {
+        let goals: Vec<Goal> = serde_json::from_str(
+            r#"[{"use":"sun_clear"},{"use":"in_front","args":{"a":{"kind":"Tree"},"b":{"kind":"building","near":{"kind":"car"}}}},
+                {"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"kind":"tree"}}},
+                {"def":{"name":"x","about":"x","score":{"op":"ramp","x":{"f":"dist","obj":{"kind":"swimming pool"}},"lo":300,"hi":0}}}]"#,
+        )
+        .unwrap();
+        let lib = golden_core::library::seeds();
+        assert_eq!(kinds_in(&goals, &lib), ["tree", "building", "car", "swimming pool"], "fountain isn't a kind: left out");
+        assert!(kinds_in(&[Goal::using("sun_clear")], &lib).is_empty(), "a sun-only brief needs no objects");
     }
 
     #[test]
