@@ -302,6 +302,7 @@ mod tests {
         let o = Object {
             id: "x".into(),
             kind: "tree".into(),
+            name: None,
             lat: 34.05,
             lon: -118.251,
             base_m: 0.0,
