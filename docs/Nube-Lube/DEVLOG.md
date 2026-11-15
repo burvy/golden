@@ -248,3 +248,7 @@ video it needs to be big. What changed (web/index.html, web/v2/js/app.js):
   the title pointing at "Check the new ones" (the old box and its button are gone).
 - int-test.mjs looks for that line in `.sp-title`; all 21 checks pass (fixture and live, Edge, 1440x900).
 - Not checked yet: phone width (the box is 62% of the screen height there).
+- Follow-ups: the 3D view's sky was black because v2 never called `setSun` (three's Sky shader normalises a
+  zero sun vector); it now gets the sun where it meets the spot's skyline (`hidden_az_deg`, `hidden_elev_deg`,
+  else 3° up). The header's brief pills are gone (written, never read; the chat's chips show the same while it
+  asks), and the chat panel is titled "Golden Chat". int-test: all 21 checks pass.

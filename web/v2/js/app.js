@@ -58,7 +58,6 @@ function goalWords(k) {
 const GREET = 'What do you want to shoot? Tell me what should be in the frame, the light and the day if you know them. I’ll ask about anything that changes where you stand.';
 function bubble(role, html) { const d = document.createElement('div'); d.className = `b ${role}`; d.innerHTML = html; $('#log').append(d); $('#log').scrollTop = 1e9; return d; }
 const chipHTML = t => / \(my pick\)$/.test(t) ? `<span class="chip pick" title="My pick: say if you want something else">${esc(t.replace(/ \(my pick\)$/, ''))}, my pick</span>` : `<span class="chip">${esc(t)}</span>`;
-function header(list) { $('#hbrief').innerHTML = list.map(t => `<span>${esc(t.replace(/ \(my pick\)$/, ''))}</span>`).join(''); }
 function choices(list) {
   $('#choices').innerHTML = list.map((t, i) => `<button type="button" class="${i ? '' : 'def'}">${esc(t)}</button>`).join('');
   $('#choices').querySelectorAll('button').forEach((b, i) => (b.onclick = () => send(list[i])));
@@ -70,7 +69,7 @@ async function send(text, go = false, instant = false) {
   const wait = bubble('agent', '<span class="dots" aria-label="Thinking"><i></i><i></i><i></i></span>');
   try {
     const r = await data.chat({ messages: S.messages, go, tz: 'America/Los_Angeles', instant });
-    wait.remove(); header(r.understood || []);
+    wait.remove();
     if (r.ask) {
       S.messages.push({ role: 'agent', text: r.ask.question });
       bubble('agent', esc(r.ask.question)); choices(r.ask.choices || []);
@@ -320,6 +319,8 @@ async function media(p) {
       if (S.picks[S.sel] !== p || viewTab !== '3d') return;
       v.innerHTML = '';
       view3d = await m.create({ host: v, base: BASE, lat: p.lat, lon: p.lon, yaw: az, tilesetUrl: at.tileset_url, attribution: at.attribution, onStatus: () => {} });
+      // the sky shader needs a sun position (black without one): the sun where it meets this spot's skyline, else low in the west/east
+      view3d.setSun?.(az, p.spot?.sun?.hidden_elev_deg ?? 3);
     } catch (_) { if (S.picks[S.sel] === p) v.innerHTML = '<div class="ph">No 3D view here: golden’s server isn’t reachable, or has no mesh for this spot.</div>'; }
   }
 }
