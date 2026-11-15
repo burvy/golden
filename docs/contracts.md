@@ -345,7 +345,7 @@ musts on **in the browser**, from these numbers, without a second scoring engine
 only ever run in core. Editing a formula, adding a goal, switching a must off or "check the new spots" is a new `POST /api/search`.
 Example: `fixtures/search_layers.json` (the mock's downtown, 4 goals, 1,264 candidates, 55 KB).
 
-There is one candidate per heat cell, so a layer is exact, not a summary.
+There is one candidate per heat cell, so a layer is exact, not a summary. The candidate is not always the cell's centre: points that object goals march to (`in_front`, `lined_up`) fold into the cell they fall in, and core keeps the best one by the searched weights. A spot sits at its candidate's real point. A weight edit in the browser rescores each cell's candidate but doesn't re-pick inside the cell, so object briefs are exact per chosen candidate; sun-only briefs (one candidate = the centre) are exact.
 
 ```json
 "layers": [
