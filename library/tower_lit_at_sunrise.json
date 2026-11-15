@@ -1,6 +1,6 @@
 {
   "name": "tower_lit_at_sunrise",
-  "about": "The rising sun lights a (morning light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 195-15 deg, the only side a sunrise-lit face can be on) drops points before any skyline is traced, so use it as a must. For briefs like 'morning light on the tower (lab: sunrise-lit-tower)'",
+  "about": "The rising sun lights the building a (morning light on the face you see): the sun is behind you, within 30 deg of straight behind, and the building is in view. Its must (the building at bearing 195-15 deg, the only side a sunrise-lit face can be on, all year from the tropics to 45 deg N; measured in LA and Princeton on Nov 14, Jun 21 and Dec 21) drops points before any skyline is traced, so use it as a must. For briefs like 'morning light on the tower (lab: sunrise-lit-tower)'",
   "params": ["a"],
   "must": { "op": "or", "of": [
     { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 285, "width": 90 }, "than": { "num": 0 } },
