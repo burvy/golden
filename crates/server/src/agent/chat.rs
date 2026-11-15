@@ -673,7 +673,7 @@ mod tests {
         assert!(why[0].msg.starts_with("no object of kind \"fountain\""), "{why:?}");
         // once a fountain and a tower are known, it runs
         let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
-            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(),
+            id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(), name: None,
         };
         let objects = [obj("t:1", "fountain", 0.0005), obj("t:2", "tower", 0.001)];
         assert!(checkable(&g[1], &golden_core::search::Inputs { library: &lib, objects: &objects }, &b.area));

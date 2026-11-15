@@ -373,7 +373,7 @@ mod tests {
     /// An object `east`, `north` metres from the test centre.
     fn obj(id: &str, kind: &str, east: f64, north: f64, top_m: f64, radius_m: f64) -> Object {
         let (lat, lon) = offset((LAT, LON), east, north);
-        Object { id: id.into(), kind: kind.into(), lat, lon, base_m: 0.0, top_m, radius_m, source: "test".into() }
+        Object { id: id.into(), kind: kind.into(), lat, lon, base_m: 0.0, top_m, radius_m, source: "test".into(), name: None }
     }
 
     fn view(east: f64, north: f64) -> View {
