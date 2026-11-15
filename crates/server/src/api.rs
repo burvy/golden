@@ -218,7 +218,7 @@ async fn get_scene(State(st): State<Arc<AppState>>, q: Q<SceneQ>) -> Result<Resp
         }
         let _ = tokio::fs::write(&path, &built.bytes).await;
     }
-    st.scenes.lock().await.insert(built.meta.id.clone(), Arc::new(built.bytes));
+    crate::guard::bounded_insert(&mut *st.scenes.lock().await, built.meta.id.clone(), Arc::new(built.bytes), crate::guard::MAX_SCENES);
     Ok(Json(built.meta).into_response())
 }
 
@@ -316,6 +316,7 @@ async fn get_photo(q: Q<PhotoQ>) -> Result<Response, ApiErr> {
 
 async fn fetch_oblique(req: &PhotoReq) -> Result<vexcel::Oblique, ApiErr> {
     vexcel::get_oblique_with(req.lat, req.lon, req.az, &req.options()).await.map_err(|e| match e {
+        vexcel::Error::NoKey if crate::guard::get().offline => crate::guard::offline_err("no aerial photo here"),
         vexcel::Error::NoKey => ApiErr(axum::http::StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
         vexcel::Error::Api { status: 403 | 404, .. } => ApiErr::unprocessable("no Vexcel aerial photo here"),
         vexcel::Error::BadData(m) => ApiErr::bad(m),

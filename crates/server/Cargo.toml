@@ -13,7 +13,7 @@ contracts = { path = "../contracts" }
 thiserror = "1"
 costar = { path = "../costar" }
 chrono-tz = "0.10"
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
