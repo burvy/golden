@@ -177,6 +177,9 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     let place_name = place.name.clone();
     let mut sheet = sheet_for(st, for_sheet, place, llm.as_ref(), log).await?;
     sheet.brief.text = brief.text.clone();
+    if let Some(s) = &mut sheet.search {
+        s.brief.text = brief.text.clone();
+    }
     if keep_unchecked_out(&mut sheet, &unchecked, &place_name) {
         sheet.steps.push(AgentStep { tool: "goals".into(), summary: "Reworded the sheet: it named things the search didn't check".into() });
     }
@@ -922,6 +925,9 @@ mod tests {
         assert!(!names_any(&sheet.summary, &["fountain", "tower"]), "{}", sheet.summary);
         assert_eq!(sheet.brief.text, brief.text);
         assert_eq!(sheet.brief.goals, [Goal::using("sun_clear")], "the search only got the goal it can score");
+        let search = sheet.search.as_ref().unwrap();
+        assert_eq!(search.brief.text, brief.text, "the search's brief has the user's words too");
+        assert_eq!(search.layers.iter().map(|l| l.goal.as_str()).collect::<Vec<_>>(), ["sun_clear"]);
         assert!(sheet.spots[0].spot.scores.iter().all(|r| r.goal == "sun_clear"));
         assert_eq!(sheet.caveats[0], r.note.unwrap());
         assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("no objects are known here")), "{:?}", sheet.steps);

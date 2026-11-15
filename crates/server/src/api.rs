@@ -165,7 +165,17 @@ pub async fn run_search(st: &AppState, brief: Brief) -> Result<SearchResult, Api
             s.building_id = kit.buildings_near(s.lat, s.lon, 40.0).first().map(|b| b.id.clone());
         }
     }
-    Ok(SearchResult { brief, spots, heat: out.heat, searched: out.searched, took_ms: t0.elapsed().as_millis() as u64, layers: vec![], stages: vec![], spacing_m: None, objects: vec![] })
+    Ok(SearchResult {
+        brief,
+        spots,
+        heat: out.heat,
+        searched: out.searched,
+        took_ms: t0.elapsed().as_millis() as u64,
+        layers: out.layers,
+        stages: out.stages,
+        spacing_m: Some(out.spacing_m),
+        objects: out.objects,
+    })
 }
 
 // ---- /api/scene ------------------------------------------------------------------------------

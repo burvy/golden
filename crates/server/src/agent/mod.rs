@@ -168,6 +168,8 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
 
     // 4. assemble, then write the words
     let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, costar, notes);
+    // The whole search too (heat, goal layers, stages), so the app can draw the map and re-weight goals.
+    sheet.search = Some(result);
     let mut model = "mock".to_string();
     if let Some(g) = llm {
         match write_with_claude(g, &place, &sheet).await {
@@ -924,6 +926,11 @@ mod tests {
         assert!(sheet.caveats.iter().any(|c| c.contains("offline mock")));
         // Synthetic heights are not Vexcel, so no photo was fetched.
         assert!(sheet.spots.iter().all(|s| s.photo_url.is_none()));
+        // the search rides along, for the map and re-weighting
+        let search = sheet.search.expect("the sheet carries its search");
+        assert_eq!(search.layers.len(), 1, "the implicit sun goal");
+        assert_eq!(search.spots[0].id, sheet.spots[0].spot.id);
+        assert_eq!(search.brief, sheet.brief);
     }
 
     #[tokio::test]
