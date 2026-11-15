@@ -80,117 +80,123 @@ Scenarios (shot classes), ungated. Runs with at least one spot, then medians ove
 
 | scenario | standing | event | what it asks | runs with a spot | candidates | skyline traces | spots | time |
 |---|---|---|---|---|---|---|---|---|
-| `clear` | Any | sunset | sun in view down to the horizon, roof or street | 54 of 54 (18 places) | 550 | 550 | 10 | 1214 ms |
-| `between` | Any | sunset | sun sets into a gap between buildings, roof or street | 51 of 54 (18 places) | 550 | 550 | 6 | 1222 ms |
-| `behind` | Any | sunset | sun drops behind a building, roof or street | 54 of 54 (18 places) | 550 | 550 | 10 | 1259 ms |
-| `street-between` | Ground | sunset | street level, sun sets into a gap | 21 of 54 (11 places) | 235 | 235 | 0 | 527 ms |
-| `street-behind` | Ground | sunset | street level, sun drops behind a building | 53 of 54 (18 places) | 235 | 235 | 10 | 536 ms |
-| `tower-and-sunset` | Any | sunset | sunset in view, and the tower must fill part of the frame (fills is a must) | 54 of 54 (18 places) | 550 | 144 | 10 | 459 ms |
-| `soft-tower` | Any | sunset | as tower-and-sunset, but fills only weighted 0.5 (the agent's default shape) | 54 of 54 (18 places) | 550 | 550 | 10 | 1234 ms |
-| `sun-by-tower` | Any | sunset | the sun must set within 15 deg of the tower; clear sky weighted 0.5 | 45 of 54 (17 places) | 550 | 550 | 5 | 1235 ms |
-| `tower-framing-sunset` | Any | sunset | the tower must fill part of the frame and the sun must set within 15 deg of it | 25 of 54 (11 places) | 550 | 144 | 0 | 395 ms |
-| `sunrise-by-tower` | Any | sunrise | sunrise: the sun must come up within 15 deg of the tower; clear sky weighted 0.5 | 50 of 54 (18 places) | 550 | 550 | 7 | 1142 ms |
-| `silhouette` | Any | sunset | the sun drops behind the tower: sun_behind, with the sun within 5 deg of the tower (a must) | 32 of 54 (13 places) | 550 | 550 | 1 | 1241 ms |
-| `between-towers` | Any | sunset | the sun sets between the two tallest buildings, both in one frame, in front of you (a must); clear sky weighted 0.5 | 39 of 54 (14 places) | 550 | 550 | 3 | 1312 ms |
-| `looking-up` | Ground | sunset | street level, low angle: the tower looms over you (25+ deg tall, best 35+) and in view (a must); sun in view weighted 0.5 | 51 of 54 (17 places) | 235 | 11 | 3 | 102 ms |
-| `rooftop-skyline` | Roof | sunset | on a roof, the tower reads as skyline (2-20 deg tall, best 4-12, in view; a must) with the sun setting within 15 deg of it (a must) | 24 of 54 (9 places) | 274 | 50 | 0 | 246 ms |
-| `open-view` | Any | sunset | an open view: the sun stays in view to within 1 deg of the horizon (a must), ranked on clear sky | 45 of 54 (17 places) | 550 | 550 | 5 | 1180 ms |
-| `sunrise-silhouette` | Any | sunrise | dawn silhouette: the sun comes up from behind the tower (sun_behind, sun within 5 deg of the tower; a must) | 33 of 54 (14 places) | 550 | 550 | 1 | 1067 ms |
-| `sunrise-between-towers` | Any | sunrise | the sun rises between the two tallest buildings, both in one frame, in front of you (a must); clear sky weighted 0.5 | 38 of 54 (15 places) | 550 | 550 | 5 | 1080 ms |
-| `lit-tower` | Any | sunset | golden light on the tower: the setting sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5 | 49 of 54 (18 places) | 550 | 550 | 4 | 1228 ms |
-| `sunrise-lit-tower` | Any | sunrise | morning light on the tower: the rising sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5 | 42 of 54 (16 places) | 550 | 550 | 6 | 1030 ms |
-| `sunrise-clear` | Any | sunrise | sunrise in view from the horizon up, roof or street (sun only) | 54 of 54 (18 places) | 550 | 550 | 10 | 1205 ms |
-| `sunrise-open-view` | Any | sunrise | the library's open_horizon at sunrise: in view from within 1 deg of the horizon (a must), ranked on clear sky (sun only) | 50 of 54 (18 places) | 550 | 550 | 8 | 1087 ms |
-| `sun-by-tower2` | Any | sunset | as sun-by-tower, on the second tallest building | 49 of 54 (18 places) | 550 | 550 | 7 | 1123 ms |
-| `silhouette-tower2` | Any | sunset | as silhouette, on the second tallest building | 35 of 54 (16 places) | 550 | 550 | 1 | 1098 ms |
-| `lit-tower2` | Any | sunset | as lit-tower, on the second tallest building | 51 of 54 (18 places) | 550 | 550 | 4 | 1181 ms |
-| `sunrise-between` | Any | sunrise | the sun rises out of a gap between buildings, roof or street (sun only) | 51 of 54 (18 places) | 550 | 550 | 10 | 1080 ms |
-| `sunrise-behind` | Any | sunrise | the sun comes up from behind a building, roof or street (sun only) | 54 of 54 (18 places) | 550 | 550 | 10 | 1005 ms |
-| `sunrise-wide-gap` | Any | sunrise | the library's sun_wide_gap at sunrise (a must; sun only) | 43 of 54 (17 places) | 550 | 550 | 7 | 1076 ms |
-| `wide-gap` | Any | sunset | the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only) | 48 of 54 (18 places) | 550 | 550 | 3 | 1042 ms |
+| `clear` | Any | sunset | sun in view down to the horizon, roof or street | 54 of 54 (18 places) | 550 | 550 | 10 | 1065 ms |
+| `between` | Any | sunset | sun sets into a gap between buildings, roof or street | 51 of 54 (18 places) | 550 | 550 | 6 | 1015 ms |
+| `behind` | Any | sunset | sun drops behind a building, roof or street | 54 of 54 (18 places) | 550 | 550 | 10 | 1042 ms |
+| `street-between` | Ground | sunset | street level, sun sets into a gap | 21 of 54 (11 places) | 235 | 235 | 0 | 453 ms |
+| `street-behind` | Ground | sunset | street level, sun drops behind a building | 53 of 54 (18 places) | 235 | 235 | 10 | 506 ms |
+| `tower-and-sunset` | Any | sunset | sunset in view, and the tower must fill part of the frame (fills is a must) | 54 of 54 (18 places) | 550 | 144 | 10 | 455 ms |
+| `soft-tower` | Any | sunset | as tower-and-sunset, but fills only weighted 0.5 (the agent's default shape) | 54 of 54 (18 places) | 550 | 550 | 10 | 1232 ms |
+| `sun-by-tower` | Any | sunset | the sun must set within 15 deg of the tower; clear sky weighted 0.5 | 45 of 54 (17 places) | 550 | 550 | 5 | 1205 ms |
+| `tower-framing-sunset` | Any | sunset | the tower must fill part of the frame and the sun must set within 15 deg of it | 25 of 54 (11 places) | 550 | 144 | 0 | 362 ms |
+| `sunrise-by-tower` | Any | sunrise | sunrise: the sun must come up within 15 deg of the tower; clear sky weighted 0.5 | 50 of 54 (18 places) | 550 | 550 | 7 | 1150 ms |
+| `silhouette` | Any | sunset | the sun drops behind the tower: sun_behind, with the sun within 5 deg of the tower (a must) | 32 of 54 (13 places) | 550 | 550 | 1 | 1175 ms |
+| `between-towers` | Any | sunset | the sun sets between the two tallest buildings, both in one frame, in front of you (a must); clear sky weighted 0.5 | 39 of 54 (14 places) | 550 | 550 | 3 | 1131 ms |
+| `looking-up` | Ground | sunset | street level, low angle: the tower looms over you (25+ deg tall, best 35+) and in view (a must); sun in view weighted 0.5 | 51 of 54 (17 places) | 235 | 11 | 3 | 106 ms |
+| `rooftop-skyline` | Roof | sunset | on a roof, the tower reads as skyline (2-20 deg tall, best 4-12, in view; a must) with the sun setting within 15 deg of it (a must) | 24 of 54 (9 places) | 274 | 50 | 0 | 249 ms |
+| `open-view` | Any | sunset | an open view: the sun stays in view to within 1 deg of the horizon (a must), ranked on clear sky | 45 of 54 (17 places) | 550 | 550 | 5 | 1073 ms |
+| `sunrise-silhouette` | Any | sunrise | dawn silhouette: the sun comes up from behind the tower (sun_behind, sun within 5 deg of the tower; a must) | 33 of 54 (14 places) | 550 | 550 | 1 | 927 ms |
+| `sunrise-between-towers` | Any | sunrise | the sun rises between the two tallest buildings, both in one frame, in front of you (a must); clear sky weighted 0.5 | 38 of 54 (15 places) | 550 | 550 | 5 | 963 ms |
+| `lit-tower` | Any | sunset | golden light on the tower: the setting sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5 | 49 of 54 (18 places) | 550 | 550 | 4 | 1019 ms |
+| `sunrise-lit-tower` | Any | sunrise | morning light on the tower: the rising sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5 | 42 of 54 (16 places) | 550 | 550 | 6 | 1092 ms |
+| `sunrise-clear` | Any | sunrise | sunrise in view from the horizon up, roof or street (sun only) | 54 of 54 (18 places) | 550 | 550 | 10 | 1076 ms |
+| `sunrise-open-view` | Any | sunrise | the library's open_horizon at sunrise: in view from within 1 deg of the horizon (a must), ranked on clear sky (sun only) | 50 of 54 (18 places) | 550 | 550 | 8 | 1082 ms |
+| `sun-by-tower2` | Any | sunset | as sun-by-tower, on the second tallest building | 49 of 54 (18 places) | 550 | 550 | 7 | 1121 ms |
+| `silhouette-tower2` | Any | sunset | as silhouette, on the second tallest building | 35 of 54 (16 places) | 550 | 550 | 1 | 1003 ms |
+| `lit-tower2` | Any | sunset | as lit-tower, on the second tallest building | 51 of 54 (18 places) | 550 | 550 | 4 | 1065 ms |
+| `sunrise-between` | Any | sunrise | the sun rises out of a gap between buildings, roof or street (sun only) | 51 of 54 (18 places) | 550 | 550 | 10 | 923 ms |
+| `sunrise-behind` | Any | sunrise | the sun comes up from behind a building, roof or street (sun only) | 54 of 54 (18 places) | 550 | 550 | 10 | 913 ms |
+| `sunrise-wide-gap` | Any | sunrise | the library's sun_wide_gap at sunrise (a must; sun only) | 43 of 54 (17 places) | 550 | 550 | 7 | 899 ms |
+| `pair-and-sunset` | Any | sunset | sunset in view with the two tallest buildings both in the frame and in view (a must) | 44 of 54 (15 places) | 550 | 26 | 6 | 181 ms |
+| `skyline-glow` | Any | sunset | the setting sun behind you lights both tallest buildings, both in one frame and in view (a must) | 19 of 54 (9 places) | 550 | 550 | 0 | 980 ms |
+| `sunrise-skyline-glow` | Any | sunrise | the rising sun behind you lights both tallest buildings, both in one frame and in view (a must) | 25 of 54 (10 places) | 550 | 550 | 0 | 947 ms |
+| `wide-gap` | Any | sunset | the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only) | 48 of 54 (18 places) | 550 | 550 | 3 | 1009 ms |
 
 Class (a) = speed gate, judged by recall@10 and prune. Class (b) = shot class (changes the result on purpose), judged by prune and a sane result.
 Skyline traces are summed over all runs of the row. Ray what-ifs: traces and time are estimates (the gate is evaluated in the lab, not in a search).
 
 | gate | class | kind | scenario | runs | places | tested runs (places) | prune median (min-max) | recall@10 min | near-best kept | skyline traces ungated -> gated | rays/cand (one trace) | time ungated -> gated |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `tower_framable` | (a) | entry | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 493 -> 489 ms |
-| `tower_framable` | (a) | entry | soft-tower | 54 | 18 | 54 (18) | 4% (0%-64%) | 10% | 509/534 | 27624 -> 24366 | - | 1328 -> 1204 ms |
-| `tower_framable` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 4% (0%-64%) | 100% | 74/74 | 7257 -> 7257 | - | 435 -> 443 ms |
-| `tower_toward_sunset` | (a) | entry | sun-by-tower | 54 | 18 | 45 (17) | 76% (11%-100%) | 100% | 333/333 | 27624 -> 10764 | - | 1264 -> 542 ms |
-| `tower_toward_sunset` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 76% (11%-100%) | 100% | 74/74 | 7257 -> 2688 | - | 435 -> 234 ms |
-| `tower_toward_sunset` | (a) | entry | silhouette | 54 | 18 | 32 (13) | 76% (11%-100%) | 100% | 73/73 | 27624 -> 10764 | - | 1258 -> 513 ms |
-| `tower_toward_sunset` | (a) | entry | rooftop-skyline | 54 | 18 | 24 (9) | 76% (11%-100%) | 100% | 100/100 | 3234 -> 1419 | - | 278 -> 173 ms |
-| `tower_toward_sunrise` | (a) | entry | sunrise-by-tower | 54 | 18 | 50 (18) | 51% (6%-96%) | 100% | 317/317 | 27624 -> 11772 | - | 1147 -> 538 ms |
-| `tower_toward_sunrise` | (a) | entry | sunrise-silhouette | 54 | 18 | 33 (14) | 51% (6%-96%) | 100% | 56/56 | 27624 -> 11772 | - | 1111 -> 512 ms |
-| `tower_framed_toward_sunset` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 77% (12%-100%) | 100% | 74/74 | 7257 -> 2688 | - | 435 -> 236 ms |
-| `sunset_beside` | (a) | entry | sun-by-tower | 54 | 18 | 45 (17) | 76% (11%-100%) | 100% | 333/333 | 27624 -> 10764 | - | 1264 -> 546 ms |
-| `sunset_beside` | (a) | entry | sun-by-tower2 | 54 | 18 | 49 (18) | 67% (6%-98%) | 100% | 401/401 | 27624 -> 11124 | - | 1174 -> 552 ms |
-| `sunrise_beside` | (a) | entry | sunrise-by-tower | 54 | 18 | 50 (18) | 51% (6%-96%) | 100% | 317/317 | 27624 -> 11772 | - | 1147 -> 527 ms |
-| `tower_fills` | (a) | entry | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 493 -> 489 ms |
-| `sunset_behind` | (a) | entry | silhouette | 54 | 18 | 32 (13) | 76% (11%-100%) | 100% | 73/73 | 27624 -> 10764 | - | 1258 -> 515 ms |
-| `sunset_behind` | (a) | entry | silhouette-tower2 | 54 | 18 | 35 (16) | 67% (6%-98%) | 100% | 84/84 | 27624 -> 11124 | - | 1162 -> 532 ms |
-| `sunset_between_two` | (a) | entry | between-towers | 51 | 17 | 39 (14) | 76% (7%-100%) | 100% | 295/295 | 26181 -> 8403 | - | 1229 -> 491 ms |
-| `towers_over` | (a) | entry | looking-up | 54 | 18 | 51 (17) | 93% (0%-100%) | 100% | 444/444 | 1332 -> 1332 | - | 138 -> 141 ms |
-| `skyline_view` | (a) | entry | rooftop-skyline | 54 | 18 | 24 (9) | 14% (3%-100%) | 100% | 100/100 | 3234 -> 3234 | - | 278 -> 278 ms |
-| `sunrise_behind` | (a) | entry | sunrise-silhouette | 54 | 18 | 33 (14) | 51% (6%-96%) | 100% | 56/56 | 27624 -> 11772 | - | 1111 -> 514 ms |
-| `sunrise_between_two` | (a) | entry | sunrise-between-towers | 51 | 17 | 38 (15) | 63% (7%-100%) | 100% | 449/449 | 26181 -> 10950 | - | 1102 -> 537 ms |
-| `tower_lit_at_sunset` | (a) | entry | lit-tower | 54 | 18 | 49 (18) | 36% (1%-94%) | 100% | 157/157 | 27624 -> 14895 | - | 1211 -> 720 ms |
-| `tower_lit_at_sunset` | (a) | entry | lit-tower2 | 54 | 18 | 51 (18) | 43% (5%-97%) | 100% | 135/135 | 27624 -> 14358 | - | 1173 -> 644 ms |
-| `tower_lit_at_sunrise` | (a) | entry | sunrise-lit-tower | 54 | 18 | 42 (16) | 61% (6%-99%) | 100% | 218/218 | 27624 -> 13305 | - | 1096 -> 585 ms |
-| `tower_over_2_deg` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 0% (0%-0%) | 100% | 578/578 | 7257 -> 7257 | - | 493 -> 478 ms |
-| `tower_under_40_deg` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 493 -> 491 ms |
-| `tower_in_view` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 71% (29%-99%) | 100% | 578/578 | 7257 -> 7257 | - | 493 -> 487 ms |
-| `on_roof` | (b) | sweep | clear | 54 | 18 | 54 (18) | 50% (35%-72%) | 70% | 1725/1807 | 27624 -> 13983 | - | 1311 -> 826 ms |
-| `on_roof` | (b) | sweep | between | 54 | 18 | 51 (18) | 50% (35%-72%) | 30% | 175/215 | 27624 -> 13983 | - | 1311 -> 808 ms |
-| `on_roof` | (b) | sweep | behind | 54 | 18 | 54 (18) | 50% (35%-72%) | 20% | 3784/6245 | 27624 -> 13983 | - | 1349 -> 820 ms |
-| `on_roof` | (b) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 50% (35%-72%) | 60% | 577/578 | 7257 -> 4617 | - | 493 -> 376 ms |
-| `on_roof` | (b) | sweep | soft-tower | 54 | 18 | 54 (18) | 50% (35%-72%) | 70% | 532/534 | 27624 -> 13983 | - | 1328 -> 808 ms |
-| `on_roof` | (b) | sweep | sun-by-tower | 54 | 18 | 45 (17) | 50% (35%-72%) | 0% | 179/333 | 27624 -> 13983 | - | 1264 -> 769 ms |
-| `looms_3` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-2%) | 100% | 215/215 | 27624 -> 27594 | - | 1311 -> 1321 ms |
-| `looms_3` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-2%) | 100% | 6244/6245 | 27624 -> 27594 | - | 1349 -> 1359 ms |
-| `looms_3` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-4%) | 100% | 97/97 | 13641 -> 13614 | - | 634 -> 630 ms |
-| `looms_3` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-4%) | 100% | 2510/2510 | 13641 -> 13614 | - | 645 -> 649 ms |
-| `looms_west_3` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-60%) | 33% | 212/215 | 27624 -> 26100 | - | 1311 -> 1239 ms |
-| `looms_west_3` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-60%) | 0% | 6005/6245 | 27624 -> 26100 | - | 1349 -> 1270 ms |
-| `looms_west_3` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-52%) | 0% | 92/97 | 13641 -> 13029 | - | 634 -> 595 ms |
-| `looms_west_3` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-52%) | 30% | 2424/2510 | 13641 -> 13029 | - | 645 -> 621 ms |
-| `looms_8` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-65%) | 10% | 203/215 | 27624 -> 25593 | - | 1311 -> 1214 ms |
-| `looms_8` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-65%) | 0% | 5516/6245 | 27624 -> 25593 | - | 1349 -> 1256 ms |
-| `looms_8` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-62%) | 20% | 94/97 | 13641 -> 12600 | - | 634 -> 587 ms |
-| `looms_8` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-62%) | 40% | 2248/2510 | 13641 -> 12600 | - | 645 -> 584 ms |
-| `looms_west_8` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-77%) | 10% | 165/215 | 27624 -> 21432 | - | 1311 -> 945 ms |
-| `looms_west_8` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-77%) | 0% | 4293/6245 | 27624 -> 21432 | - | 1349 -> 976 ms |
-| `looms_west_8` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-76%) | 0% | 61/97 | 13641 -> 10545 | - | 634 -> 461 ms |
-| `looms_west_8` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-76%) | 0% | 1553/2510 | 13641 -> 10545 | - | 645 -> 465 ms |
-| `sunward_looms_3` | (a) | what-if | between | 54 | 18 | 51 (18) | 0% (0%-87%) | 10% | 195/215 | 27624 -> 23335 | - | 1311 -> 1077 ms |
-| `sunward_looms_3` | (a) | what-if | behind | 54 | 18 | 54 (18) | 0% (0%-87%) | 0% | 5101/6245 | 27624 -> 23335 | - | 1349 -> 1133 ms |
-| `sunward_looms_3` | (a) | what-if | street-between | 54 | 18 | 21 (11) | 0% (0%-83%) | 0% | 68/97 | 13641 -> 11743 | - | 634 -> 528 ms |
-| `sunward_looms_3` | (a) | what-if | street-behind | 54 | 18 | 53 (18) | 0% (0%-83%) | 0% | 2063/2510 | 13641 -> 11743 | - | 645 -> 559 ms |
-| `tower_on_sun_track` | (a) | what-if | sun-by-tower | 54 | 18 | 45 (17) | 94% (55%-100%) | 100% | 333/333 | 27624 -> 3507 | - | 1264 -> 245 ms |
-| `tower_on_sun_track` | (a) | what-if | tower-framing-sunset | 54 | 18 | 25 (11) | 94% (55%-100%) | 100% | 74/74 | 7257 -> 877 | - | 435 -> 141 ms |
-| `tower_on_sun_track` | (a) | what-if | sunrise-by-tower | 54 | 18 | 50 (18) | 93% (53%-100%) | 100% | 317/317 | 27624 -> 3766 | - | 1147 -> 231 ms |
-| `tower_on_sun_track` | (a) | what-if | silhouette | 54 | 18 | 32 (13) | 94% (55%-100%) | 100% | 73/73 | 27624 -> 3507 | - | 1258 -> 235 ms |
-| `tower_on_sun_track` | (a) | what-if | rooftop-skyline | 54 | 18 | 24 (9) | 93% (53%-100%) | 100% | 100/100 | 3234 -> 496 | - | 278 -> 125 ms |
-| `tower_on_sun_track` | (a) | what-if | sunrise-silhouette | 54 | 18 | 33 (14) | 93% (53%-100%) | 100% | 56/56 | 27624 -> 3766 | - | 1111 -> 214 ms |
-| `tower_opposite_sun_track` | (a) | what-if | lit-tower | 54 | 18 | 49 (18) | 83% (21%-100%) | 100% | 157/157 | 27624 -> 7140 | - | 1211 -> 404 ms |
-| `tower_opposite_sun_track` | (a) | what-if | sunrise-lit-tower | 54 | 18 | 42 (16) | 85% (36%-100%) | 100% | 218/218 | 27624 -> 5757 | - | 1096 -> 321 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | clear | 54 | 18 | 54 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1311 -> 497 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | between | 54 | 18 | 51 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1311 -> 501 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | street-between | 54 | 18 | 21 (11) | 92% (47%-100%) | 100% | - | 13641 -> 1886 | 12.9 (116) | 634 -> 152 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | open-view | 54 | 18 | 45 (17) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1250 -> 470 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-clear | 54 | 18 | 54 (18) | 77% (39%-97%) | 90% | - | 27624 -> 7821 | 11.7 (116) | 1126 -> 428 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-open-view | 54 | 18 | 50 (18) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1123 -> 426 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-between | 54 | 18 | 51 (18) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1085 -> 415 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-wide-gap | 54 | 18 | 43 (17) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1080 -> 415 ms |
-| `ray_sun_seen_below_6` | (a) | ray what-if | wide-gap | 54 | 18 | 48 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1179 -> 447 ms |
-| `ray_sun_seen_below_1` | (a) | ray what-if | open-view | 54 | 18 | 45 (17) | 98% (66%-100%) | 100% | - | 27624 -> 1710 | 4.5 (116) | 1250 -> 137 ms |
-| `ray_sun_seen_below_1` | (a) | ray what-if | sunrise-open-view | 54 | 18 | 50 (18) | 96% (85%-100%) | 100% | - | 27624 -> 1434 | 3.9 (116) | 1123 -> 98 ms |
-| `ray_sun_seen_below_3` | (a) | ray what-if | clear | 54 | 18 | 54 (18) | 94% (54%-99%) | 30% | - | 27624 -> 3576 | 7.8 (116) | 1311 -> 270 ms |
-| `ray_sun_seen_below_3` | (a) | ray what-if | between | 54 | 18 | 51 (18) | 94% (54%-99%) | 75% | - | 27624 -> 3576 | 7.8 (116) | 1311 -> 273 ms |
-| `ray_sun_seen_below_3` | (a) | ray what-if | street-between | 54 | 18 | 21 (11) | 100% (64%-100%) | 100% | - | 13641 -> 457 | 8.1 (116) | 634 -> 59 ms |
-| `ray_blocked_at_sunset` | (a) | ray what-if | behind | 54 | 18 | 54 (18) | 0% (0%-28%) | 100% | - | 27624 -> 26685 | 1.0 (116) | 1349 -> 1298 ms |
-| `ray_blocked_at_sunset` | (a) | ray what-if | street-behind | 54 | 18 | 53 (18) | 0% (0%-4%) | 100% | - | 13641 -> 13599 | 1.0 (116) | 645 -> 647 ms |
+| `tower_framable` | (a) | entry | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 511 -> 525 ms |
+| `tower_framable` | (a) | entry | soft-tower | 54 | 18 | 54 (18) | 4% (0%-64%) | 10% | 509/534 | 27624 -> 24366 | - | 1391 -> 1308 ms |
+| `tower_framable` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 4% (0%-64%) | 100% | 74/74 | 7257 -> 7257 | - | 485 -> 496 ms |
+| `tower_toward_sunset` | (a) | entry | sun-by-tower | 54 | 18 | 45 (17) | 76% (11%-100%) | 100% | 333/333 | 27624 -> 10764 | - | 1325 -> 561 ms |
+| `tower_toward_sunset` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 76% (11%-100%) | 100% | 74/74 | 7257 -> 2688 | - | 485 -> 270 ms |
+| `tower_toward_sunset` | (a) | entry | silhouette | 54 | 18 | 32 (13) | 76% (11%-100%) | 100% | 73/73 | 27624 -> 10764 | - | 1364 -> 539 ms |
+| `tower_toward_sunset` | (a) | entry | rooftop-skyline | 54 | 18 | 24 (9) | 76% (11%-100%) | 100% | 100/100 | 3234 -> 1419 | - | 297 -> 187 ms |
+| `tower_toward_sunrise` | (a) | entry | sunrise-by-tower | 54 | 18 | 50 (18) | 51% (6%-96%) | 100% | 317/317 | 27624 -> 11772 | - | 1258 -> 623 ms |
+| `tower_toward_sunrise` | (a) | entry | sunrise-silhouette | 54 | 18 | 33 (14) | 51% (6%-96%) | 100% | 56/56 | 27624 -> 11772 | - | 1204 -> 568 ms |
+| `tower_framed_toward_sunset` | (a) | entry | tower-framing-sunset | 54 | 18 | 25 (11) | 77% (12%-100%) | 100% | 74/74 | 7257 -> 2688 | - | 485 -> 257 ms |
+| `sunset_beside` | (a) | entry | sun-by-tower | 54 | 18 | 45 (17) | 76% (11%-100%) | 100% | 333/333 | 27624 -> 10764 | - | 1325 -> 573 ms |
+| `sunset_beside` | (a) | entry | sun-by-tower2 | 54 | 18 | 49 (18) | 67% (6%-98%) | 100% | 401/401 | 27624 -> 11124 | - | 1252 -> 613 ms |
+| `sunrise_beside` | (a) | entry | sunrise-by-tower | 54 | 18 | 50 (18) | 51% (6%-96%) | 100% | 317/317 | 27624 -> 11772 | - | 1258 -> 627 ms |
+| `tower_fills` | (a) | entry | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 511 -> 525 ms |
+| `sunset_behind` | (a) | entry | silhouette | 54 | 18 | 32 (13) | 76% (11%-100%) | 100% | 73/73 | 27624 -> 10764 | - | 1364 -> 542 ms |
+| `sunset_behind` | (a) | entry | silhouette-tower2 | 54 | 18 | 35 (16) | 67% (6%-98%) | 100% | 84/84 | 27624 -> 11124 | - | 1279 -> 620 ms |
+| `sunset_between_two` | (a) | entry | between-towers | 51 | 17 | 39 (14) | 76% (7%-100%) | 100% | 295/295 | 26181 -> 8403 | - | 1386 -> 547 ms |
+| `towers_over` | (a) | entry | looking-up | 54 | 18 | 51 (17) | 93% (0%-100%) | 100% | 444/444 | 1332 -> 1332 | - | 151 -> 148 ms |
+| `skyline_view` | (a) | entry | rooftop-skyline | 54 | 18 | 24 (9) | 14% (3%-100%) | 100% | 100/100 | 3234 -> 3234 | - | 297 -> 297 ms |
+| `sunrise_behind` | (a) | entry | sunrise-silhouette | 54 | 18 | 33 (14) | 51% (6%-96%) | 100% | 56/56 | 27624 -> 11772 | - | 1204 -> 558 ms |
+| `sunrise_between_two` | (a) | entry | sunrise-between-towers | 51 | 17 | 38 (15) | 63% (7%-100%) | 100% | 449/449 | 26181 -> 10950 | - | 1229 -> 625 ms |
+| `tower_lit_at_sunset` | (a) | entry | lit-tower | 54 | 18 | 49 (18) | 36% (1%-94%) | 100% | 157/157 | 27624 -> 14895 | - | 1342 -> 821 ms |
+| `tower_lit_at_sunset` | (a) | entry | lit-tower2 | 54 | 18 | 51 (18) | 43% (5%-97%) | 100% | 135/135 | 27624 -> 14358 | - | 1228 -> 670 ms |
+| `tower_lit_at_sunrise` | (a) | entry | sunrise-lit-tower | 54 | 18 | 42 (16) | 61% (6%-99%) | 100% | 218/218 | 27624 -> 13305 | - | 1161 -> 612 ms |
+| `both_in_frame` | (a) | entry | pair-and-sunset | 51 | 17 | 41 (14) | 18% (1%-92%) | 100% | 288/288 | 1950 -> 1950 | - | 227 -> 221 ms |
+| `skyline_glow` | (a) | entry | skyline-glow | 51 | 17 | 16 (8) | 57% (18%-100%) | 100% | 25/25 | 26181 -> 10044 | - | 1176 -> 549 ms |
+| `skyline_glow_at_sunrise` | (a) | entry | sunrise-skyline-glow | 51 | 17 | 22 (9) | 80% (17%-100%) | 100% | 47/47 | 26181 -> 7773 | - | 1099 -> 443 ms |
+| `tower_over_2_deg` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 0% (0%-0%) | 100% | 578/578 | 7257 -> 7257 | - | 511 -> 530 ms |
+| `tower_under_40_deg` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 4% (0%-64%) | 100% | 578/578 | 7257 -> 7257 | - | 511 -> 506 ms |
+| `tower_in_view` | (a) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 71% (29%-99%) | 100% | 578/578 | 7257 -> 7257 | - | 511 -> 526 ms |
+| `on_roof` | (b) | sweep | clear | 54 | 18 | 54 (18) | 50% (35%-72%) | 70% | 1725/1807 | 27624 -> 13983 | - | 1285 -> 762 ms |
+| `on_roof` | (b) | sweep | between | 54 | 18 | 51 (18) | 50% (35%-72%) | 30% | 175/215 | 27624 -> 13983 | - | 1188 -> 739 ms |
+| `on_roof` | (b) | sweep | behind | 54 | 18 | 54 (18) | 50% (35%-72%) | 20% | 3784/6245 | 27624 -> 13983 | - | 1210 -> 772 ms |
+| `on_roof` | (b) | sweep | tower-and-sunset | 54 | 18 | 54 (18) | 50% (35%-72%) | 60% | 577/578 | 7257 -> 4617 | - | 511 -> 407 ms |
+| `on_roof` | (b) | sweep | soft-tower | 54 | 18 | 54 (18) | 50% (35%-72%) | 70% | 532/534 | 27624 -> 13983 | - | 1391 -> 872 ms |
+| `on_roof` | (b) | sweep | sun-by-tower | 54 | 18 | 45 (17) | 50% (35%-72%) | 0% | 179/333 | 27624 -> 13983 | - | 1325 -> 811 ms |
+| `looms_3` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-2%) | 100% | 215/215 | 27624 -> 27594 | - | 1188 -> 1198 ms |
+| `looms_3` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-2%) | 100% | 6244/6245 | 27624 -> 27594 | - | 1210 -> 1294 ms |
+| `looms_3` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-4%) | 100% | 97/97 | 13641 -> 13614 | - | 653 -> 632 ms |
+| `looms_3` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-4%) | 100% | 2510/2510 | 13641 -> 13614 | - | 652 -> 634 ms |
+| `looms_west_3` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-60%) | 33% | 212/215 | 27624 -> 26100 | - | 1188 -> 1154 ms |
+| `looms_west_3` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-60%) | 0% | 6005/6245 | 27624 -> 26100 | - | 1210 -> 1254 ms |
+| `looms_west_3` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-52%) | 0% | 92/97 | 13641 -> 13029 | - | 653 -> 604 ms |
+| `looms_west_3` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-52%) | 30% | 2424/2510 | 13641 -> 13029 | - | 652 -> 612 ms |
+| `looms_8` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-65%) | 10% | 203/215 | 27624 -> 25593 | - | 1188 -> 1109 ms |
+| `looms_8` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-65%) | 0% | 5516/6245 | 27624 -> 25593 | - | 1210 -> 1264 ms |
+| `looms_8` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-62%) | 20% | 94/97 | 13641 -> 12600 | - | 653 -> 572 ms |
+| `looms_8` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-62%) | 40% | 2248/2510 | 13641 -> 12600 | - | 652 -> 617 ms |
+| `looms_west_8` | (a) | sweep | between | 54 | 18 | 51 (18) | 0% (0%-77%) | 10% | 165/215 | 27624 -> 21432 | - | 1188 -> 848 ms |
+| `looms_west_8` | (a) | sweep | behind | 54 | 18 | 54 (18) | 0% (0%-77%) | 0% | 4293/6245 | 27624 -> 21432 | - | 1210 -> 975 ms |
+| `looms_west_8` | (a) | sweep | street-between | 54 | 18 | 21 (11) | 0% (0%-76%) | 0% | 61/97 | 13641 -> 10545 | - | 653 -> 454 ms |
+| `looms_west_8` | (a) | sweep | street-behind | 54 | 18 | 53 (18) | 0% (0%-76%) | 0% | 1553/2510 | 13641 -> 10545 | - | 652 -> 490 ms |
+| `sunward_looms_3` | (a) | what-if | between | 54 | 18 | 51 (18) | 0% (0%-87%) | 10% | 195/215 | 27624 -> 23335 | - | 1188 -> 976 ms |
+| `sunward_looms_3` | (a) | what-if | behind | 54 | 18 | 54 (18) | 0% (0%-87%) | 0% | 5101/6245 | 27624 -> 23335 | - | 1210 -> 1146 ms |
+| `sunward_looms_3` | (a) | what-if | street-between | 54 | 18 | 21 (11) | 0% (0%-83%) | 0% | 68/97 | 13641 -> 11743 | - | 653 -> 540 ms |
+| `sunward_looms_3` | (a) | what-if | street-behind | 54 | 18 | 53 (18) | 0% (0%-83%) | 0% | 2063/2510 | 13641 -> 11743 | - | 652 -> 580 ms |
+| `tower_on_sun_track` | (a) | what-if | sun-by-tower | 54 | 18 | 45 (17) | 94% (55%-100%) | 100% | 333/333 | 27624 -> 3507 | - | 1325 -> 274 ms |
+| `tower_on_sun_track` | (a) | what-if | tower-framing-sunset | 54 | 18 | 25 (11) | 94% (55%-100%) | 100% | 74/74 | 7257 -> 877 | - | 485 -> 148 ms |
+| `tower_on_sun_track` | (a) | what-if | sunrise-by-tower | 54 | 18 | 50 (18) | 93% (53%-100%) | 100% | 317/317 | 27624 -> 3766 | - | 1258 -> 266 ms |
+| `tower_on_sun_track` | (a) | what-if | silhouette | 54 | 18 | 32 (13) | 94% (55%-100%) | 100% | 73/73 | 27624 -> 3507 | - | 1364 -> 248 ms |
+| `tower_on_sun_track` | (a) | what-if | rooftop-skyline | 54 | 18 | 24 (9) | 93% (53%-100%) | 100% | 100/100 | 3234 -> 496 | - | 297 -> 136 ms |
+| `tower_on_sun_track` | (a) | what-if | sunrise-silhouette | 54 | 18 | 33 (14) | 93% (53%-100%) | 100% | 56/56 | 27624 -> 3766 | - | 1204 -> 232 ms |
+| `tower_opposite_sun_track` | (a) | what-if | lit-tower | 54 | 18 | 49 (18) | 83% (21%-100%) | 100% | 157/157 | 27624 -> 7140 | - | 1342 -> 451 ms |
+| `tower_opposite_sun_track` | (a) | what-if | sunrise-lit-tower | 54 | 18 | 42 (16) | 85% (36%-100%) | 100% | 218/218 | 27624 -> 5757 | - | 1161 -> 319 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | clear | 54 | 18 | 54 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1285 -> 487 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | between | 54 | 18 | 51 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1188 -> 454 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | street-between | 54 | 18 | 21 (11) | 92% (47%-100%) | 100% | - | 13641 -> 1886 | 12.9 (116) | 653 -> 158 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | open-view | 54 | 18 | 45 (17) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1369 -> 527 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-clear | 54 | 18 | 54 (18) | 77% (39%-97%) | 90% | - | 27624 -> 7821 | 11.7 (116) | 1135 -> 432 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-open-view | 54 | 18 | 50 (18) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1122 -> 422 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-between | 54 | 18 | 51 (18) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1100 -> 424 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | sunrise-wide-gap | 54 | 18 | 43 (17) | 77% (39%-97%) | 100% | - | 27624 -> 7821 | 11.7 (116) | 1058 -> 408 ms |
+| `ray_sun_seen_below_6` | (a) | ray what-if | wide-gap | 54 | 18 | 48 (18) | 79% (38%-97%) | 100% | - | 27624 -> 7520 | 12.1 (116) | 1167 -> 446 ms |
+| `ray_sun_seen_below_1` | (a) | ray what-if | open-view | 54 | 18 | 45 (17) | 98% (66%-100%) | 100% | - | 27624 -> 1710 | 4.5 (116) | 1369 -> 159 ms |
+| `ray_sun_seen_below_1` | (a) | ray what-if | sunrise-open-view | 54 | 18 | 50 (18) | 96% (85%-100%) | 100% | - | 27624 -> 1434 | 3.9 (116) | 1122 -> 98 ms |
+| `ray_sun_seen_below_3` | (a) | ray what-if | clear | 54 | 18 | 54 (18) | 94% (54%-99%) | 30% | - | 27624 -> 3576 | 7.8 (116) | 1285 -> 266 ms |
+| `ray_sun_seen_below_3` | (a) | ray what-if | between | 54 | 18 | 51 (18) | 94% (54%-99%) | 75% | - | 27624 -> 3576 | 7.8 (116) | 1188 -> 249 ms |
+| `ray_sun_seen_below_3` | (a) | ray what-if | street-between | 54 | 18 | 21 (11) | 100% (64%-100%) | 100% | - | 13641 -> 457 | 8.1 (116) | 653 -> 60 ms |
+| `ray_blocked_at_sunset` | (a) | ray what-if | behind | 54 | 18 | 54 (18) | 0% (0%-28%) | 100% | - | 27624 -> 26685 | 1.0 (116) | 1210 -> 1164 ms |
+| `ray_blocked_at_sunset` | (a) | ray what-if | street-behind | 54 | 18 | 53 (18) | 0% (0%-4%) | 100% | - | 13641 -> 13599 | 1.0 (116) | 652 -> 654 ms |
 
 Verdicts. A class (a) gate is kept when recall@10 is 100% in every run, on at least 2 places, with median prune at least 30%. Class (b) is reported, not judged on recall. The `soft-tower` rows (a gate on a goal that is only weighted) are left out of the verdicts.
 
@@ -209,6 +215,9 @@ Verdicts. A class (a) gate is kept when recall@10 is 100% in every run, on at le
 - `sunrise_between_two` [entry] (Sun rises between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 215-355 deg, where the rising sun can't be) drops points before any skyline is traced, so use it as a must): **keep**: full recall (tested in 38 runs on 15 places), median prune 63%
 - `tower_lit_at_sunset` [entry] (The setting sun lights a (golden light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 345-165 deg, the only side a sunset-lit face can be on) drops points before any skyline is traced, so use it as a must): **keep**: full recall (tested in 100 runs on 18 places), median prune 41%
 - `tower_lit_at_sunrise` [entry] (The rising sun lights a (morning light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 195-15 deg, the only side a sunrise-lit face can be on) drops points before any skyline is traced, so use it as a must): **keep**: full recall (tested in 42 runs on 16 places), median prune 61%
+- `both_in_frame` [entry] (a and b both in one frame and both in view (e.g. two towers in the shot). Its must (a and b within a lens angle of each other) drops points before any line-of-sight march): **weak**: full recall, but median prune only 18%
+- `skyline_glow` [entry] (The setting sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 345-165 deg) drops points before any skyline is traced, so use it as a must): **keep**: full recall (tested in 16 runs on 8 places), median prune 57%
+- `skyline_glow_at_sunrise` [entry] (The rising sun lights a and b together, both in one frame (the skyline glows): the sun behind you, within 30 deg of straight behind each, both in view. Its must (a and b in one frame, both at bearing 195-15 deg) drops points before any skyline is traced, so use it as a must): **keep**: full recall (tested in 22 runs on 9 places), median prune 80%
 - `tower_over_2_deg` [sweep]: **weak**: full recall, but median prune only 0%
 - `tower_under_40_deg` [sweep]: **weak**: full recall, but median prune only 4%
 - `tower_in_view` [sweep]: **keep**: full recall (tested in 54 runs on 18 places), median prune 71%
@@ -410,6 +419,31 @@ The lab now runs places in parallel (about 12 minutes for everything), and the t
    That's a fair guess, not yet checked spot by spot. The entry is still exact: wherever there are
    spots, it keeps them all.
 
+## What we learned (round 5)
+
+Round 5 added shots with two buildings in one frame, and re-ran everything at a 500 m radius to check
+the entries hold on bigger areas. The 500 m run printed only; the table above is for 300 m.
+
+1. **Skyline glow, a new shot class: the low sun lights both towers in one frame.** "The skyline glows
+   at sunset" is a classic city shot. It's rare at these places: spots in 19 of 54 runs at sunset and
+   25 of 54 at sunrise. The two towers have to stand together on the side away from the sun.
+   - `skyline_glow`: 100% recall in 16 tested runs on 8 places, 57% pruned, traces 26181 -> 10044.
+   - `skyline_glow_at_sunrise`: 100% recall in 22 tested runs on 9 places, 80% pruned, traces
+     26181 -> 7773.
+   - Their must is the lit-tower cone on both buildings, plus "in one frame".
+2. **`both_in_frame` (two towers in the shot) is weak: 18%.** It's like `towers_over`. The plain brief's
+   must already runs on line of sight (Ray tier), before the skyline (a median of 26 traces). So the
+   entry's cheap `in_frame` must only saves marches. It's kept in library/ as a building block, not for
+   SEEDS.
+3. **Everything holds at 500 m.** With a 500 m area every entry keeps 100% recall in every run (18
+   places, 3 days). "The tower" is then the tallest building within 500 m, often a different building,
+   which tests the entries again.
+   - Prune moves with where that tower stands: `sunset_beside` 54% (68% at 300 m),
+     `sunrise_beside` 82% (51%), `sunset_between_two` 81%, `skyline_glow` 89%.
+   - `tower_lit_at_sunrise` drops to 24% there. It's still exact, only less of a speed-up.
+   - The 6-deg ray precheck kept every spot at 500 m, including `sunrise-clear` (450 tested runs). The
+     300 m loss at Mercer West still stands, so the advice in round 3 doesn't change.
+
 ## Promote list (for SEEDS)
 
 Ranked for the demo. **Update (round 4): Ray's 053 (object sources) has merged**, so the server now
@@ -418,7 +452,8 @@ entries can bind today wherever the area has a building object. In the lab, Prin
 from the height map. The server's come from Vexcel detection, so in Princeton an object entry works
 only where detection finds the building. "Sun only" entries need no objects at all.
 Every entry below has **100% recall@10 in every run**: 3 days (Nov 14, Jun 21, Dec 21), 18 places,
-and for the sunset entries both the tallest and the second tallest building. "Tested" counts the runs
+and for the sunset entries both the tallest and the second tallest building. All of them also keep
+100% at a 500 m radius (round 5). "Tested" counts the runs
 whose ungated search found spots (the others can't lose any). Prune is the median share of candidates
 its own must drops before any skyline trace (min-max over places). Traces and time are summed or
 averaged over all its runs, with and without it.
@@ -435,7 +470,9 @@ averaged over all its runs, with and without it.
 | 8 | `tower_lit_at_sunrise` | "morning light on the tower" (`sunrise-lit-tower`) | yes, needs a building object | 42 of 54 (16) | 61% (6-99%) | 27624 -> 13305 | 1096 -> 585 ms |
 | 9 | `sunrise_beside` | "the sun rises beside the tower" (`sunrise-by-tower`) | yes, needs a building object | 50 of 54 (18) | 51% (6-96%) | 27624 -> 11772 | 1147 -> 527 ms |
 | 10 | `sunrise_behind` | "dawn silhouette behind the tower" (`sunrise-silhouette`) | yes, needs a building object | 33 of 54 (14) | 51% (6-96%) | 27624 -> 11772 | 1111 -> 514 ms |
-| 11 | `towers_over` | "low angle, looking up at the tower" (`looking-up`) | yes, needs a building object | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
+| 11 | `skyline_glow` | "the skyline glows: low sun on both towers" (`skyline-glow`) | yes, needs two building objects | 16 of 51 (8) | 57% (18-100%) | 26181 -> 10044 | 1176 -> 549 ms |
+| 12 | `skyline_glow_at_sunrise` | "morning glow on both towers" (`sunrise-skyline-glow`) | yes, needs two building objects | 22 of 51 (9) | 80% (17-100%) | 26181 -> 7773 | 1099 -> 443 ms |
+| 13 | `towers_over` | "low angle, looking up at the tower" (`looking-up`) | yes, needs a building object | 51 of 54 (17) | 93% (0-100%) | 1332 -> 1332 (saves line-of-sight marches only) | 138 -> 141 ms |
 
 (Rows 1 and 2: tested runs and prune are the 065 ray what-if on those scenarios. The `open-view`
 scenario writes the same must inline.)
@@ -445,7 +482,8 @@ How it's ranked:
 2. Then the sunset object shots, by how common the brief is. "Beside" and "behind" are the hero
    shots.
 3. Then the sunrise mirrors.
-4. `towers_over` is last. It's correct, but its brief already gates on line of sight, so it saves no
+4. The skyline-glow pair is new and rare (few tested runs), so it comes after the single-tower shots.
+5. `towers_over` is last. It's correct, but its brief already gates on line of sight, so it saves no
    time.
 
 Not for SEEDS:
@@ -453,6 +491,7 @@ Not for SEEDS:
   direction gates, and they're already the musts inside the entries above. Seed one only if the agent
   needs a standalone "the tower is toward the sunset" gate for its own briefs.
 - `tower_framable`, `tower_fills` and `skyline_view` are weak (4-14%). See round 2, point 3.
+- `both_in_frame` is weak (18%). See round 5, point 2.
 
 What-ifs (not entries) show what 064 would add: with the day's sun track, the sunset and sunrise
 entries would prune a median 93% (209 tested runs), and the lit-tower ones 84% (91 tested runs).

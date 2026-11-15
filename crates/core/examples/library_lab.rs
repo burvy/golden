@@ -246,10 +246,37 @@ fn scenarios() -> Vec<Scenario> {
         sunrise(plain("sunrise-wide-gap", "the library's sun_wide_gap at sunrise (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         })),
+        // ---- round 5: two buildings in one frame ----
+        plain("pair-and-sunset", "sunset in view with the two tallest buildings both in the frame and in view (a must)", Standing::Any, |c| {
+            format!(
+                r#"[{{"use":"sun_clear"}},
+                    {{"def":{{"name":"pair","about":"Both towers in one frame, in view",
+                    "score":{{"op":"mul","of":[{{"f":"in_frame","a":{t},"b":{u}}},{{"f":"visible","obj":{t}}},{{"f":"visible","obj":{u}}}]}}}},"must":true}}]"#,
+                t = c.tower,
+                u = c.tower2
+            )
+        }),
+        plain("skyline-glow", "the setting sun behind you lights both tallest buildings, both in one frame and in view (a must)", Standing::Any, glow),
+        sunrise(plain("sunrise-skyline-glow", "the rising sun behind you lights both tallest buildings, both in one frame and in view (a must)", Standing::Any, glow)),
         plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         }),
     ]
+}
+
+/// The low sun behind you lights both towers, both in one frame and in view. Same goals at sunset and sunrise.
+fn glow(c: &Ctx) -> String {
+    let lit = |o: &str| {
+        format!(r#"{{"op":"bump","x":{{"op":"max","of":[{{"f":"sun_bearing_diff","obj":{o}}},{{"op":"mul","of":[{{"f":"sun_bearing_diff","obj":{o}}},{{"num":-1}}]}}]}},"at":180,"width":30}}"#)
+    };
+    format!(
+        r#"[{{"def":{{"name":"glow","about":"The low sun lights both towers",
+            "score":{{"op":"mul","of":[{la},{lb},{{"f":"visible","obj":{t}}},{{"f":"visible","obj":{u}}},{{"f":"in_frame","a":{t},"b":{u}}}]}}}},"must":true,"weight":1}}]"#,
+        la = lit(&c.tower),
+        lb = lit(&c.tower2),
+        t = c.tower,
+        u = c.tower2
+    )
 }
 
 /// The same scenario on the second tower.
@@ -400,6 +427,10 @@ fn gates() -> Vec<Gate> {
         Gate { replaces: Some(0), ..entry("sunrise_between_two", &["sunrise-between-towers"]) },
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunset", &["lit-tower", "lit-tower2"]) },
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunrise", &["sunrise-lit-tower"]) },
+        // round 5: two buildings in one frame
+        Gate { replaces: Some(1), ..entry("both_in_frame", &["pair-and-sunset"]) },
+        Gate { replaces: Some(0), ..entry("skyline_glow", &["skyline-glow"]) },
+        Gate { replaces: Some(0), ..entry("skyline_glow_at_sunrise", &["sunrise-skyline-glow"]) },
         // why framing gates prune so little: the two halves of the size range, and the line of sight
         tower_test("tower_over_2_deg", r#"{"op":"gt","x":{"f":"size_deg","obj":TOWER},"than":{"num":2}}"#),
         tower_test("tower_under_40_deg", r#"{"op":"lt","x":{"f":"size_deg","obj":TOWER},"than":{"num":40}}"#),
