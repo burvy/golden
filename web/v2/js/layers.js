@@ -84,6 +84,13 @@ export function stagesFor(result, goals, run) {
   return out;
 }
 
+/** Edits the layers can't answer: a goal that dropped points (a must, or a formula with its own gate) was
+ *  switched off or removed. Points it dropped were never scored on the later goals (core stops at the first
+ *  gate), so letting them back in needs a new POST /api/search. Weights and must-on are exact here. */
+export function needsServer(result, goals) {
+  return result.layers.some((L, k) => (L.must || (L.gate || []).length) && (goals[k].removed || (L.must && !goals[k].must)));
+}
+
 /** The server's spot at a picked cell, if it sent one there (spot lat/lon are rounded to 1e-5). */
 export function serverSpotAt(result, i) {
   return result.spots.find(s => cellOf(result.heat, s.lat, s.lon) === i) || null;
@@ -106,7 +113,7 @@ export function withLayers(result) {
   const best = Math.max(0, ...result.heat.values.filter(v => v != null));
   return { ...result, legacy: true, brief: { ...result.brief, goals: one ? goals : [] }, spacing_m: result.spacing_m ?? Math.max(40, 2 * result.heat.cell_m),
     // one goal: the heat is that goal's score (scaled to the best); more: the combined fit, which can't be split
-    layers: [{ goal: one ? (one.use || one.def?.name) : goals.length ? 'fit' : `sun_${result.brief.framing || 'clear'}`, weight: 1, must: false, heat: result.heat, gate: [] }],
+    layers: [{ goal: one ? (one.use || one.def?.name) : goals.length ? 'fit' : `sun_${result.brief.framing || 'clear'}`, weight: one ? (one.weight ?? (one.must ? 0 : 1)) : 1, must: !!one?.must, heat: result.heat, gate: [] }],
     stages: result.stages?.length ? result.stages : [{ label: 'Somewhere to stand', n: result.searched ?? searched, goal: null }],
     objects: result.objects || [], best };
 }

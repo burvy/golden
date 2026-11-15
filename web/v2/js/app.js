@@ -3,7 +3,7 @@
 // re-weights, masks and re-picks those numbers (layers.js). Anything that changes a formula, the area, or
 // needs exact sun times for a new spot is a new POST /api/search (data.js).
 import { createData } from './data.js';
-import { rebuild, stagesFor, initialGoals, serverSpotAt, editedGoals, cellLatLon } from './layers.js';
+import { rebuild, stagesFor, initialGoals, serverSpotAt, editedGoals, cellLatLon, needsServer } from './layers.js';
 import { createMap, RAMP_CSS } from './map.js';
 
 const $ = s => document.querySelector(s);
@@ -150,7 +150,7 @@ function renderGoals() {
       </div>
       <div class="gmeta">${meta}${!g.must && own ? `<span>Its formula still needs its own condition (${fmt(own)} points out)</span>` : ''}
         ${w.saved ? '' : '<span class="new">Written for this brief</span>'}</div>
-      ${r.legacy ? '' : `<details><summary>How it’s scored</summary>
+      ${!r.brief.goals?.[k] ? '' : `<details><summary>How it’s scored</summary>
         <label class="sr" for="f${k}">Formula</label><textarea id="f${k}" class="formula" spellcheck="false">${esc(JSON.stringify(w.json, null, 1))}</textarea>
         <div class="frow"><button type="button" data-a="run" data-needs-server>Search with this formula</button><span class="ferr" role="status"></span></div></details>`}
     </li>`;
@@ -166,10 +166,10 @@ function renderGoals() {
     ${edited() ? '<button type="button" class="reset" id="resetgoals">Back to my goals as searched</button>' : ''}`;
   $('#glists').querySelectorAll('.goal').forEach(li => {
     const k = +li.dataset.k, g = S.goals[k], on = (a, f) => { const el = li.querySelector(`[data-a=${a}]`); if (el) f(el); };
-    on('undo', b => (b.onclick = () => { g.removed = false; flash(); rerun(); }));
-    on('must', b => (b.onchange = e => { g.must = e.target.checked; if (g.must) { g.prev = g.weight; g.weight = 0; } else g.weight = g.prev || 1; flash(); rerun(); }));
+    on('undo', b => (b.onclick = () => { g.removed = false; edit(); }));
+    on('must', b => (b.onchange = e => { g.must = e.target.checked; if (g.must) { g.prev = g.weight; g.weight = 0; } else g.weight = g.prev || 1; edit(); }));
     on('w', b => (b.oninput = e => { g.weight = +e.target.value; li.querySelector('output').textContent = g.weight.toFixed(1); flash(); rerun({ soon: true }); }));
-    on('rm', b => (b.onclick = () => { g.removed = true; flash(); rerun(); }));
+    on('rm', b => (b.onclick = () => { g.removed = true; edit(); }));
     on('layer', b => (b.onclick = () => { S.layer = S.layer === k ? 'all' : k; renderGoals(); renderLayers(); drawMap(); }));
     on('run', b => (b.onclick = () => {
       let goal; try { goal = JSON.parse(li.querySelector('textarea').value); } catch (e) { li.querySelector('.ferr').textContent = `That isn’t valid JSON: ${e.message}`; return; }
@@ -179,6 +179,20 @@ function renderGoals() {
   });
   const rs = $('#resetgoals'); if (rs) rs.onclick = () => { S.goals = initialGoals(S.result); flash(); rerun(); };
   setBusy(S.searching ? $('#busy').textContent : null);
+}
+
+// A goal edit: instant from the layers, unless it lets dropped points back in (their scores were never
+// computed, core stops at the first gate): then it's a new search with the goals as edited.
+function edit() {
+  flash();
+  if (!needsServer(S.result, S.goals)) return rerun();
+  if (data.fixture) { // no server to ask: undo just the edits that would let points back in
+    const start = initialGoals(S.result);
+    S.goals = S.goals.map((g, k) => (needsServer(S.result, start.map((x, j) => (j === k ? g : x))) ? start[k] : g));
+    toast('Letting dropped points back in needs golden’s server (it never scored them); this page is showing saved example data.', true);
+    return rerun();
+  }
+  searchAgain(editedBrief(), 'Letting those points back in: searching again…');
 }
 
 // ---------------------------------------------------------------- the funnel: a band of light, narrowing

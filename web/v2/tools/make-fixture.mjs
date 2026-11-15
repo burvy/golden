@@ -63,18 +63,27 @@ for (let i = 0; i < SIDE * SIDE; i++) {
 }
 const sited = cells.filter(Boolean);
 
-// ---- score every goal at every sited candidate (core must do the same, no short-circuit)
+// ---- the funnel, short-circuited like core: gates in order (here close_to_tower, then in_front), each
+// its formula's own `must` first, then its score if the goal is a must. At the first failure the candidate
+// is dropped and nothing after is computed, so later layers are null there. Survivors get every goal.
 const scoreOf = (g, c) => Math.max(0, Math.min(1, evaluate(g.fn.score, c.feat, g.args)));
 const ownGate = (g, c) => !g.fn.must || evaluate(g.fn.must, c.feat, g.args) > 0;
-const layers = GOALS.map(g => {
-  const values = cells.map(c => (c ? r3(scoreOf(g, c)) : null));
-  const gate = sited.filter(c => !ownGate(g, c)).map(c => c.i);
-  return { goal: g.name, weight: g.weight, must: g.must, heat: grid(values), gate };
-});
+const gatesInOrder = GOALS.filter(g => g.must || g.fn.must);
+const layers = GOALS.map(g => ({ goal: g.name, weight: g.weight, must: g.must, heat: grid(cells.map(() => null)), gate: [] }));
+for (const c of sited) {
+  let out = false;
+  for (const g of gatesInOrder) {
+    const L = layers[GOALS.indexOf(g)];
+    if (!ownGate(g, c)) { L.gate.push(c.i); out = true; break; }
+    L.heat.values[c.i] = r3(scoreOf(g, c));
+    if (g.must && !(L.heat.values[c.i] > 0)) { out = true; break; }
+  }
+  if (!out) GOALS.forEach((g, k) => (layers[k].heat.values[c.i] = r3(scoreOf(g, c))));
+}
 function grid(values) { return { center_lat: CENTER.lat, center_lon: CENTER.lon, cell_m: CELL, width: SIDE, height: SIDE, values }; }
 
 // ---- the browser rule, as the contract states it (the Rust test checks the same thing)
-const dropped = i => layers.some(L => L.gate.includes(i) || (L.must && L.heat.values[i] <= 0));
+const dropped = i => layers.some(L => L.gate.includes(i) || (L.must && !(L.heat.values[i] > 0)));
 let ranked = layers.filter(L => L.weight > 0).map(L => [L, L.weight]);
 if (!ranked.length) ranked = layers.map(L => [L, 1 / layers.length]);
 const raw = cells.map(c => (c ? (dropped(c.i) ? 0 : ranked.reduce((s, [L, w]) => s + w * L.heat.values[c.i], 0)) : null));
@@ -86,7 +95,7 @@ const stages = [{ label: 'Points in the area', n: inCircle, goal: null }, { labe
 let alive = sited.map(c => c.i);
 for (const [gi, L] of layers.entries()) {
   if (!L.must && !L.gate.length) continue;
-  alive = alive.filter(i => !(L.gate.includes(i) || (L.must && L.heat.values[i] <= 0)));
+  alive = alive.filter(i => !(L.gate.includes(i) || (L.must && !(L.heat.values[i] > 0))));
   stages.push({ label: GOALS[gi].label, n: alive.length, goal: L.goal });
 }
 
