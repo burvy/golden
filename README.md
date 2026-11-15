@@ -1,6 +1,8 @@
 # `golden`
 Find where to stand, for any shot.
 
+[burvy.dev/golden](https://burvy.dev/golden)
+
 Tell golden the shot you want in plain English ("sun setting between two towers, from a rooftop, tonight").
 It asks a question or two, turns your words into goals you can see and edit, searches every standpoint in the area,
 and gives back a short ranked list. For each spot you get the sun over the skyline in 3D, a Vexcel aerial photo,
