@@ -1,0 +1,88 @@
+{
+  "name": "skyline_at_sunset",
+  "about": "a reads as skyline (2-20 deg tall, best 4-12, in view) with the sun setting within 15 deg of it, e.g. from a roof across town. Its must (2-20 deg tall, at bearing 180-330 deg) drops points before any line-of-sight march or skyline, so use it as a must. For briefs like 'the skyline from a roof, the sun setting by the tower (lab: skyline-sunset)'",
+  "params": [
+    "a"
+  ],
+  "must": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 2
+        }
+      },
+      {
+        "op": "lt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 20
+        }
+      },
+      {
+        "op": "gt",
+        "x": {
+          "op": "bump",
+          "x": {
+            "f": "bearing",
+            "obj": "a"
+          },
+          "at": 255,
+          "width": 75
+        },
+        "than": {
+          "num": 0
+        }
+      }
+    ]
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "and",
+        "of": [
+          {
+            "op": "ramp",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "lo": 2,
+            "hi": 4
+          },
+          {
+            "op": "ramp",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "lo": 20,
+            "hi": 12
+          }
+        ]
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      },
+      {
+        "op": "bump",
+        "x": {
+          "f": "sun_bearing_diff",
+          "obj": "a"
+        },
+        "at": 0,
+        "width": 15
+      }
+    ]
+  }
+}

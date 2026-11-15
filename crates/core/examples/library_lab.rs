@@ -249,12 +249,54 @@ fn scenarios() -> Vec<Scenario> {
         plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         }),
+        // ---- round 5 shot classes: each is a library entry's score without its must (see `shot`) ----
+        plain("foreground-sunset", "a building in front of the tower, the sun setting behind the tower (within 20 deg; a must); clear sky weighted 0.5", Standing::Any, |c| {
+            shot_clear("in_front_toward_sunset", &building_then_tower(c))
+        }),
+        sunrise(plain("foreground-sunrise", "a building in front of the tower, the sun rising behind the tower (within 20 deg; a must); clear sky weighted 0.5", Standing::Any, |c| {
+            shot_clear("in_front_toward_sunrise", &building_then_tower(c))
+        })),
+        plain("stacked-sunset", "a building stacked in front of the tower (same bearing), the sun setting right behind the stack (a must); clear sky weighted 0.5", Standing::Any, |c| {
+            shot_clear("lined_up_toward_sunset", &building_then_tower(c))
+        }),
+        sunrise(plain("stacked-sunrise", "a building stacked in front of the tower (same bearing), the sun rising right behind the stack (a must); clear sky weighted 0.5", Standing::Any, |c| {
+            shot_clear("lined_up_toward_sunrise", &building_then_tower(c))
+        })),
+        plain("sunburst", "street level: the tower looms over you (20+ deg tall) with the evening sun at its edge (within 10 deg; a must)", Standing::Ground, |c| {
+            format!("[{}]", shot("sunburst_up", &towers(c)))
+        }),
+        sunrise(plain("sunburst-sunrise", "street level: the tower looms over you (20+ deg tall) with the rising sun at its edge (within 10 deg; a must)", Standing::Ground, |c| {
+            format!("[{}]", shot("sunburst_up_sunrise", &towers(c)))
+        })),
+        plain("skyline-sunset", "on a roof: the tower reads as skyline (2-20 deg tall, best 4-12, in view) with the sun setting within 15 deg of it, as one goal (a must); clear sky weighted 0.5", Standing::Roof, |c| {
+            shot_clear("skyline_at_sunset", &towers(c))
+        }),
     ]
 }
 
 /// The same scenario on the second tower.
 fn second(s: Scenario) -> Scenario {
     Scenario { second: true, ..s }
+}
+
+/// A library entry's score as an inline must goal (weight 1), its params bound to `objs` in order, its
+/// own `must` left out: the shot class as a brief would write it without the entry's speed gate. The
+/// entry standing in for it (`replaces: Some(0)`) then has the same score, so recall is exact.
+fn shot(name: &str, objs: &[String]) -> String {
+    let path = repo().join("library").join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let params: Vec<String> = v["params"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let bound: Vec<(String, serde_json::Value)> =
+        params.iter().zip(objs).map(|(p, o)| (p.clone(), serde_json::from_str(o).expect("object ref"))).collect();
+    let mut score = v["score"].take();
+    bind(&mut score, &bound);
+    serde_json::json!({ "def": { "name": format!("{name}_shot"), "about": v["about"], "score": score }, "must": true, "weight": 1 }).to_string()
+}
+
+/// `shot` plus clear sky weighted 0.5.
+fn shot_clear(name: &str, objs: &[String]) -> String {
+    format!(r#"[{},{{"use":"sun_clear","weight":0.5}}]"#, shot(name, objs))
 }
 
 /// The same scenario at sunrise.
@@ -308,49 +350,60 @@ struct Gate {
     /// (a) a speed gate, implied by the score: judged by recall and prune. (b) a shot class, the
     /// user's intent, meant to change the result: judged by prune and a sane result.
     class: char,
+    /// The objects an entry's params are bound to, in order.
+    objs: fn(&Ctx) -> Vec<String>,
 }
 
-/// The object a library entry's `i`-th param is bound to: the tower, then the second tower.
-fn param_obj(c: &Ctx, i: usize) -> &str {
-    if i == 1 {
-        &c.tower2
-    } else {
-        &c.tower
-    }
+/// The tower, then the second tower (what an entry's params are bound to by default).
+fn towers(c: &Ctx) -> Vec<String> {
+    vec![c.tower.clone(), c.tower2.clone()]
 }
 
-/// A library entry as a must goal, its params bound by `param_obj`.
+/// Any building within 400 m of the tower, then the tower (round 5 foreground and stacked shots: a fixed
+/// second tower almost never lines up with the tower, so "some building in front of it" is the real brief).
+fn building_then_tower(c: &Ctx) -> Vec<String> {
+    vec![format!(r#"{{"kind":"building","near":{},"within_m":400}}"#, c.tower), c.tower.clone()]
+}
+
+/// A library entry as a must goal, its params bound to the tower, then the second tower.
 fn entry(name: &'static str, on: &[&'static str]) -> Gate {
+    entry_on(name, on, towers)
+}
+
+/// A library entry as a must goal, its params bound to `objs(ctx)` in order.
+fn entry_on(name: &'static str, on: &[&'static str], objs: fn(&Ctx) -> Vec<String>) -> Gate {
     Gate {
         name: name.into(),
         kind: GateKind::Entry,
         goal: Box::new(move |c, lib| {
             let params = lib.iter().find(|f| f.name == name).map(|f| f.params.clone()).unwrap_or_default();
-            let args: Vec<String> = params.iter().enumerate().map(|(i, p)| format!(r#""{p}":{}"#, param_obj(c, i))).collect();
+            let o = objs(c);
+            let args: Vec<String> = params.iter().zip(&o).map(|(p, x)| format!(r#""{p}":{x}"#)).collect();
             format!(r#"{{"use":"{name}","args":{{{}}},"must":true,"weight":1}}"#, args.join(","))
         }),
         on: on.to_vec(),
         replaces: None,
         class: 'a',
+        objs,
     }
 }
 
 /// An inline gate: `def(ctx)` is the cost function's JSON.
 fn inline(name: String, kind: GateKind, on: &[&'static str], def: impl Fn(&Ctx) -> String + Send + Sync + 'static) -> Gate {
-    Gate { name, kind, goal: Box::new(move |c, _| format!(r#"{{"def":{},"must":true}}"#, def(c))), on: on.to_vec(), replaces: None, class: 'a' }
+    Gate { name, kind, goal: Box::new(move |c, _| format!(r#"{{"def":{},"must":true}}"#, def(c))), on: on.to_vec(), replaces: None, class: 'a', objs: towers }
 }
 
-/// An entry's own `must` on its own, as a must goal with its params bound by `param_obj`: what the
+/// An entry's own `must` on its own, as a must goal with its params bound to `objs(c)`: what the
 /// entry drops before its score is computed (its prune when it stands in for a scenario's goal).
-fn must_alone(name: &str, c: &Ctx, lib: &[CostFn]) -> Result<Goal, String> {
+fn must_alone(name: &str, c: &Ctx, lib: &[CostFn], objs: fn(&Ctx) -> Vec<String>) -> Result<Goal, String> {
     let f = lib.iter().find(|f| f.name == name).ok_or(format!("no library entry {name}"))?;
     let must = f.must.as_ref().ok_or(format!("{name} has no must"))?;
     let mut v = serde_json::to_value(must).map_err(|e| e.to_string())?;
     let objs: Vec<(String, serde_json::Value)> = f
         .params
         .iter()
-        .enumerate()
-        .map(|(i, p)| Ok((p.clone(), serde_json::from_str(param_obj(c, i)).map_err(|e| e.to_string())?)))
+        .zip(objs(c))
+        .map(|(p, o)| Ok((p.clone(), serde_json::from_str(&o).map_err(|e| e.to_string())?)))
         .collect::<Result<_, String>>()?;
     bind(&mut v, &objs);
     let def = serde_json::json!({ "def": { "name": format!("{name}_must"), "about": "the entry's must", "score": v }, "must": true });
@@ -400,6 +453,14 @@ fn gates() -> Vec<Gate> {
         Gate { replaces: Some(0), ..entry("sunrise_between_two", &["sunrise-between-towers"]) },
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunset", &["lit-tower", "lit-tower2"]) },
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunrise", &["sunrise-lit-tower"]) },
+        // round 5: foreground, stacked, sunburst and skyline shots with the sun
+        Gate { replaces: Some(0), ..entry_on("in_front_toward_sunset", &["foreground-sunset"], building_then_tower) },
+        Gate { replaces: Some(0), ..entry_on("in_front_toward_sunrise", &["foreground-sunrise"], building_then_tower) },
+        Gate { replaces: Some(0), ..entry_on("lined_up_toward_sunset", &["stacked-sunset"], building_then_tower) },
+        Gate { replaces: Some(0), ..entry_on("lined_up_toward_sunrise", &["stacked-sunrise"], building_then_tower) },
+        Gate { replaces: Some(0), ..entry("sunburst_up", &["sunburst"]) },
+        Gate { replaces: Some(0), ..entry("sunburst_up_sunrise", &["sunburst-sunrise"]) },
+        Gate { replaces: Some(0), ..entry("skyline_at_sunset", &["skyline-sunset"]) },
         // why framing gates prune so little: the two halves of the size range, and the line of sight
         tower_test("tower_over_2_deg", r#"{"op":"gt","x":{"f":"size_deg","obj":TOWER},"than":{"num":2}}"#),
         tower_test("tower_under_40_deg", r#"{"op":"lt","x":{"f":"size_deg","obj":TOWER},"than":{"num":40}}"#),
@@ -979,7 +1040,7 @@ fn measure_place(place: &Place, grid: &DsmGrid, took: Duration, sh: &Shared) -> 
                     None => base_goals.iter().cloned().chain([gate_goal.clone()]).collect(),
                 };
                 let prune_goal = match gate.replaces {
-                    Some(_) => must_alone(&gate.name, &ctx, &library)?,
+                    Some(_) => must_alone(&gate.name, &ctx, &library, gate.objs)?,
                     None => gate_goal,
                 };
                 let gated = match run(&grid, &at, (scene.standing, scene.event), goals.clone(), K, &inputs) {
