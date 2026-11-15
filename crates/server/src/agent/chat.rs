@@ -12,8 +12,9 @@
 //! the sun goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`, what an empty `goals`
 //! means anyway), plus object goals as data with kinds in the user's words ("fountain in front of a tower" ->
 //! `{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`).
-//! The search can't score objects until tasks 051/052, so until then the chat says so plainly (`note`), marks
-//! them "(not checked yet)", and tells the sheet writer not to claim them.
+//! The search only gets the goals the seed library can score (sun_* since 051; objects come with 052). For the
+//! rest the chat says so plainly (`note`), marks them "(not checked yet)", and tells the sheet writer not to
+//! claim them.
 
 use super::*;
 use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal, GoalFn, ObjRef};
@@ -138,6 +139,9 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
 
     let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
     brief.goals = goals_for(&brief, &turn.rels);
+    // What the search can score today: the seed library's goals (sun_* since 051; objects come with 052).
+    let lib = golden_core::library::seeds();
+    let unchecked: Vec<Rel> = turn.rels.iter().zip(&brief.goals[1..]).filter(|(_, g)| !checkable(g, &lib)).map(|(r, _)| r.clone()).collect();
     let mut known = turn.known;
     if req.area.is_some() {
         known.push(Topic::Place);
@@ -146,7 +150,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         known.push(Topic::Date);
     }
     let mut words = understood_marked(&brief, &place, &known, ask.is_some());
-    words.extend(turn.rels.iter().map(|r| format!("{} (not checked yet)", r.words())));
+    words.extend(turn.rels.iter().map(|r| if unchecked.contains(r) { format!("{} (not checked yet)", r.words()) } else { r.words() }));
     if ask.is_some() {
         return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model, note: None });
     }
@@ -158,17 +162,19 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         n => format!("{n} questions"),
     };
     log.add("chat", format!("Understood after {qs}: {} (by {by})", words.join(", ")));
-    let note = cant_check_note(&turn.rels, brief.event);
+    let note = cant_check_note(&unchecked, brief.event);
     if let Some(n) = &note {
-        log.add("goals", format!("{n} (object goals need core tasks 051/052)"));
+        log.add("goals", format!("{n} (object goals need core task 052)"));
     }
-    // The sheet writer reads brief.text: tell it what the search ignored, then put the user's words back.
+    // The search gets only the goals it can score (an unknown name is an error since 051). The sheet writer
+    // reads brief.text: tell it what the search ignored, then put the user's words back.
     let mut for_sheet = brief.clone();
-    for_sheet.text = text_for_sheet(&brief.text, &turn.rels);
+    for_sheet.goals.retain(|g| checkable(g, &lib));
+    for_sheet.text = text_for_sheet(&brief.text, &unchecked);
     let place_name = place.name.clone();
     let mut sheet = sheet_for(st, for_sheet, place, llm.as_ref(), log).await?;
     sheet.brief.text = brief.text.clone();
-    if keep_unchecked_out(&mut sheet, &turn.rels, &place_name) {
+    if keep_unchecked_out(&mut sheet, &unchecked, &place_name) {
         sheet.steps.push(AgentStep { tool: "goals".into(), summary: "Reworded the sheet: it named things the search didn't check".into() });
     }
     if let Some(n) = &note {
@@ -190,13 +196,9 @@ fn user_text(m: &[ChatMessage]) -> String {
 }
 
 /// Pure: the goals for a settled brief: the sun goal for its framing, then one goal per object relation, its
-/// objects as kinds in the user's words. The seed library (tasks 051/052) names them.
+/// objects as kinds in the user's words. Names follow the seed library (sun_* from 051, objects from 052).
 fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
-    let sun = match b.framing {
-        Framing::Clear => "sun_clear",
-        Framing::Between => "sun_between",
-        Framing::Behind => "sun_behind",
-    };
+    let sun = golden_core::library::sun_goal_name(b.framing);
     let kind = |k: &str| ObjRef::Kind { kind: k.to_string(), near: None, within_m: None };
     let objects = rels.iter().map(|r| {
         let mut g = Goal::using(r.relation.name());
@@ -207,6 +209,11 @@ fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
         g
     });
     std::iter::once(Goal::using(sun)).chain(objects).collect()
+}
+
+/// Pure: can the search score this goal with `library` (a known name, the right args, a valid expression)?
+fn checkable(g: &Goal, library: &[contracts::CostFn]) -> bool {
+    golden_core::library::ready(std::slice::from_ref(g), library).is_ok()
 }
 
 /// Pure: the kinds named in the object goals, each once, in order.
@@ -222,8 +229,8 @@ fn kinds(rels: &[Rel]) -> Vec<&str> {
     k
 }
 
-/// Pure: the plain sentence for the results when the search can't check the object goals (all of them, until
-/// tasks 051/052): "I can't place the fountain or the tower yet; searching for the sunset part."
+/// Pure: the plain sentence for the results when the search can't check some object goals (all of them, until
+/// task 052): "I can't place the fountain or the tower yet; searching for the sunset part."
 fn cant_check_note(rels: &[Rel], event: Event) -> Option<String> {
     let k = kinds(rels);
     (!k.is_empty()).then(|| {
@@ -649,6 +656,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_library_goals_are_checkable() {
+        let lib = golden_core::library::seeds();
+        let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
+        let g = goals_for(&b, &read_rels("fountain in front of a tower"));
+        assert!(checkable(&g[0], &lib), "sun_between is a seed (051)");
+        assert!(!checkable(&g[1], &lib), "in_front isn't, until 052");
+    }
+
     fn rel(relation: Relation, a: &str, b: &str) -> Rel {
         Rel { relation, a: a.into(), b: b.into() }
     }
@@ -818,8 +834,10 @@ mod tests {
         assert!(!names_any(&sheet.title, &["fountain", "tower"]), "{}", sheet.title);
         assert!(!names_any(&sheet.summary, &["fountain", "tower"]), "{}", sheet.summary);
         assert_eq!(sheet.brief.text, brief.text);
+        assert_eq!(sheet.brief.goals, [Goal::using("sun_clear")], "the search only got the goal it can score");
+        assert!(sheet.spots[0].spot.scores.iter().all(|r| r.goal == "sun_clear"));
         assert_eq!(sheet.caveats[0], r.note.unwrap());
-        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("051/052")), "{:?}", sheet.steps);
+        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("052")), "{:?}", sheet.steps);
     }
 
     #[tokio::test]
