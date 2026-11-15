@@ -24,6 +24,7 @@ mod agent;
 mod api;
 mod heights;
 mod mesh;
+mod objects;
 mod scene;
 mod secrets;
 mod state;
