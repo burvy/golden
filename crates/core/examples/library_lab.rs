@@ -262,6 +262,12 @@ fn scenarios() -> Vec<Scenario> {
         plain("silhouette-w10", "as silhouette, but the sun within 10 deg of the tower", Standing::Any, |c| silhouette_w(c, 10.0)),
         plain("silhouette-w20", "as silhouette, but the sun within 20 deg of the tower", Standing::Any, |c| silhouette_w(c, 20.0)),
         plain("lit-tower-w20", "as lit-tower, but the sun within 20 deg of straight behind you", Standing::Any, |c| lit_tower_w(c, 20.0)),
+        // ---- round 7: sun-only street shots ----
+        plain("down-the-street", "street level, the sun sets down a street: a 1.5-20 deg gap, in view to 2 deg (a must, street written as a goal; sun only)", Standing::Any, |_| street_gap()),
+        sunrise(plain("sunrise-down-the-street", "as down-the-street, at sunrise", Standing::Any, |_| street_gap())),
+        plain("keyhole", "the library's sun_keyhole: the sun sets through a 1.5-3 deg slot (a must; sun only)", Standing::Any, |_| {
+            r#"[{"use":"sun_keyhole","must":true,"weight":1}]"#.into()
+        }),
         plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         }),
@@ -295,6 +301,15 @@ fn silhouette_w(c: &Ctx, w: f64) -> String {
 /// lit_tower with the sun within `w` deg of straight behind you.
 fn lit_tower_w(c: &Ctx, w: f64) -> String {
     lit_tower(c).replace(r#""at":180,"width":30"#, &format!(r#""at":180,"width":{w}"#))
+}
+
+/// At street level, the sun in a 1.5-20 deg gap and in view to 2 deg, all in one Skyline-tier must.
+fn street_gap() -> String {
+    r#"[{"def":{"name":"street_gap","about":"Sun down the street",
+        "score":{"op":"mul","of":[{"op":"not","x":{"f":"roof"}},
+            {"op":"and","of":[{"op":"ramp","x":{"f":"gap_width_deg"},"lo":1,"hi":1.5},{"op":"ramp","x":{"f":"gap_width_deg"},"lo":25,"hi":20}]},
+            {"op":"ramp","x":{"f":"sun_hidden_elev"},"lo":6,"hi":2}]}},"must":true,"weight":1}]"#
+        .into()
 }
 
 /// The same scenario on the second tower.
@@ -447,6 +462,8 @@ fn gates() -> Vec<Gate> {
         Gate { replaces: Some(0), ..entry("tower_lit_at_sunrise", &["sunrise-lit-tower"]) },
         // round 5: two buildings in one frame
         Gate { replaces: Some(1), ..entry("both_in_frame", &["pair-and-sunset"]) },
+        // round 7: a sun-only entry with a Point must (street level)
+        Gate { replaces: Some(0), ..entry("sun_down_the_street", &["down-the-street", "sunrise-down-the-street"]) },
         Gate { replaces: Some(0), ..entry("skyline_glow", &["skyline-glow"]) },
         Gate { replaces: Some(0), ..entry("skyline_glow_at_sunrise", &["sunrise-skyline-glow"]) },
         // why framing gates prune so little: the two halves of the size range, and the line of sight
@@ -585,7 +602,7 @@ fn seen_below(g: &DsmGrid, e: Eye, t: &SunTrack, top: f64, top_deg: f64) -> bool
 }
 
 const RAY_GATES: &[RayGate] = &[
-    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view", "sunrise-clear", "sunrise-open-view", "wide-gap", "sunrise-between", "sunrise-wide-gap"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
+    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view", "sunrise-clear", "sunrise-open-view", "wide-gap", "sunrise-between", "sunrise-wide-gap", "down-the-street", "sunrise-down-the-street", "keyhole"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
     // open-view's must is `sun_hidden_elev < 1`: this is that test, exactly, before any skyline
     RayGate { name: "ray_sun_seen_below_1", on: &["open-view", "sunrise-open-view"], pass: |g, e, t, top| seen_below(g, e, t, top, 1.0) },
     RayGate { name: "ray_sun_seen_below_3", on: &["clear", "between", "street-between"], pass: |g, e, t, top| seen_below(g, e, t, top, 3.0) },
