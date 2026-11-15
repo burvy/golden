@@ -1,0 +1,15 @@
+{
+  "name": "sunset_between_two",
+  "about": "Sun sets between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 5-145 deg, where the sun can't be) drops points before any skyline is traced, so use it as a must",
+  "params": ["a", "b"],
+  "must": { "op": "and", "of": [
+    { "op": "gt", "x": { "f": "in_frame", "a": "a", "b": "b" }, "than": { "num": 0 } },
+    { "op": "not", "x": { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 75, "width": 70 }, "than": { "num": 0 } } },
+    { "op": "not", "x": { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "b" }, "at": 75, "width": 70 }, "than": { "num": 0 } } }
+  ] },
+  "score": { "op": "and", "of": [
+    { "op": "lt", "x": { "op": "mul", "of": [ { "f": "sun_bearing_diff", "obj": "a" }, { "f": "sun_bearing_diff", "obj": "b" } ] }, "than": { "num": 0 } },
+    { "op": "gt", "x": { "op": "bump", "x": { "f": "sun_bearing_diff", "obj": "a" }, "at": 0, "width": 90 }, "than": { "num": 0 } },
+    { "f": "in_frame", "a": "a", "b": "b" }
+  ] }
+}
