@@ -18,16 +18,22 @@
 //!    objects (`objects::bind`) has a few choices of which objects it means; at each candidate
 //!    it scores its best choice that passes its gates.
 //!    Goals that compare two objects' bearings also add **marching** candidates on the line from
-//!    b through a and beyond (`objects::march`), where a stands in front of b; they rank like
-//!    the others but aren't on the heatmap.
-//! 4. **Pick.** Normalise the scores to 0..1 and take the best, at least `min_spacing_m` apart.
-//! 5. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
+//!    b through a and beyond (`objects::march`), where a stands in front of b. Each is folded
+//!    into the heat cell it falls in: a cell's candidate is the best of its centre and its
+//!    marched points, so the heatmap still has exactly one candidate per cell.
+//! 4. **Layers.** Each goal's score at every cell's candidate (`GoalLayer`), and how many
+//!    candidates each gate left (`Stage`), so the browser can re-weight goals without a second
+//!    scoring engine (docs/contracts.md#goal-layers-and-stages). A gate still short-circuits: at
+//!    a dropped candidate only the goal that dropped it has a value (0), the rest are `null`.
+//! 5. **Pick.** Normalise the scores to 0..1 and take the best, at least `spacing` apart (between
+//!    cell centres, the rule the browser repeats).
+//! 6. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
 //!    the times on the cards are exact to the second, and write the reasons.
 //!
 //! The sun moves less than 0.01° across an 800 m area, so one track serves every candidate.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use contracts::{Area, Brief, CostFn, DsmGrid, Event, Goal, HeatGrid, HorizonPoint, Object, Rated, Spot, Standing, EARTH_R};
+use contracts::{Area, Brief, CostFn, DsmGrid, Event, Goal, GoalLayer, HeatGrid, HorizonPoint, Object, Rated, Spot, Stage, Standing, EARTH_R};
 use contracts::search::MAX_HEAT_SIDE;
 
 use crate::expr::{score_of, ExprError, Node};
@@ -69,8 +75,16 @@ pub const MAX_SPOTS: u32 = 50;
 pub struct SearchOutput {
     pub spots: Vec<Spot>,
     pub heat: HeatGrid,
-    /// Candidates scored (after the standing filter).
+    /// Heat cells with a candidate scored (after the standing filter).
     pub searched: u32,
+    /// One per goal, same order as `Spot::scores`: its raw score at each cell's candidate.
+    pub layers: Vec<GoalLayer>,
+    /// The funnel: points in the area, somewhere to stand, then one per gating goal in the order run.
+    pub stages: Vec<Stage>,
+    /// Picked spots are at least this far apart (between cell centres), metres.
+    pub spacing_m: f64,
+    /// The objects the goals can mean (every binding choice), each once, in order of first use.
+    pub objects: Vec<Object>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,41 +179,104 @@ pub fn search_with(grid: &DsmGrid, brief: &Brief, inputs: &Inputs, utc_offset_s:
     let (mut sky, n_az) = empty_window(&track);
     let scene = Scene { grid, track: &track, objects: inputs.objects, lens_deg: brief.lens_deg, top_m: grid_top(grid), n_az };
 
-    // Fast pass over every candidate: the heat grid's cells, then the marched points.
-    let mut scored = Vec::new();
-    for cell in 0..layout.len() + marched.len() {
-        let at = if cell < layout.len() { layout.candidate(cell, area.radius_m) } else { Some(marched[cell - layout.len()]) };
+    // Fast pass over every candidate: the heat grid's cells, then the marched points, each
+    // folded into its cell (the better candidate stays).
+    let mut cells: Vec<Option<Scored>> = vec![None; layout.len()];
+    let mut in_area = vec![false; layout.len()];
+    for k in 0..layout.len() + marched.len() {
+        let at = if k < layout.len() { layout.candidate(k, area.radius_m) } else { Some(marched[k - layout.len()]) };
         let Some((lat, lon)) = at else { continue };
+        let Some(cell) = (if k < layout.len() { Some(k) } else { layout.cell_at(lat, lon) }) else { continue };
+        in_area[cell] = true;
         let Some(site) = site(grid, lat, lon) else { continue };
         if !standing_ok(brief.standing, site.standing) {
             continue;
         }
         let mut probe = Probe::new(&scene, lat, lon, site, Some(&mut sky));
         // A candidate dropped by a gate still counts as searched, with 0 on the heatmap.
-        let raw = funnel.rank(&mut |c, choice| probe.value(c, choice)).unwrap_or(0.0);
-        scored.push(Scored { cell, lat, lon, site, raw });
+        let eval = funnel.evaluate(&mut |c, choice| probe.value(c, choice));
+        let s = Scored { cell, lat, lon, site, eval };
+        if cells[cell].as_ref().map_or(true, |old| s.beats(old)) {
+            cells[cell] = Some(s);
+        }
     }
+    let scored: Vec<Scored> = cells.into_iter().flatten().collect();
 
-    let best = scored.iter().map(|s| s.raw).fold(0.0, f64::max);
+    let best = scored.iter().map(|s| s.eval.raw).fold(0.0, f64::max);
     let norm = |raw: f64| if best > 0.0 { raw / best } else { 0.0 };
     let mut heat = layout.heat_grid(area.lat, area.lon);
-    for s in scored.iter().filter(|s| s.cell < layout.len()) {
-        heat.values[s.cell] = Some(norm(s.raw) as f32);
+    for s in &scored {
+        heat.values[s.cell] = Some(norm(s.eval.raw) as f32);
     }
+    let layers = layers_of(&goals, &scored, &heat);
+    let stages = stages_of(&funnel, &scored, in_area.iter().filter(|&&x| x).count());
 
     let spacing = MIN_SPACING_M.max(2.0 * layout.cell_m);
-    let picked = pick(&scored, brief.max_spots.min(MAX_SPOTS) as usize, spacing);
+    let picked = pick(&scored, &layout, brief.max_spots.min(MAX_SPOTS) as usize, spacing);
     let spots = picked
         .iter()
         .enumerate()
         .map(|(i, s)| {
             fill_skyline(grid, s.lat, s.lon, s.site.ground_m + EYE_M, scene.top_m, n_az, &mut sky);
             let ctx = SpotContext { brief, goals: &goals, funnel: &funnel, scene: &scene, date, utc_offset_s, sky: &sky };
-            make_spot(&ctx, s, i as u32 + 1, norm(s.raw))
+            make_spot(&ctx, s, i as u32 + 1, norm(s.eval.raw))
         })
         .collect();
 
-    Ok(SearchOutput { spots, heat, searched: scored.len() as u32 })
+    let objects = used_objects(&choices, inputs.objects);
+    Ok(SearchOutput { spots, heat, searched: scored.len() as u32, layers, stages, spacing_m: spacing, objects })
+}
+
+/// Each goal's raw score at every cell's candidate (`null` where the cell has none, or a gate
+/// dropped the candidate before the goal ran), and the cells its own `must` drops.
+fn layers_of(goals: &[Ready], scored: &[Scored], heat: &HeatGrid) -> Vec<GoalLayer> {
+    goals
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let mut values = vec![None; heat.values.len()];
+            let mut gate = Vec::new();
+            for s in scored {
+                values[s.cell] = s.eval.values[i].map(|v| v as f32);
+                if s.eval.gate == Some(i) {
+                    gate.push(s.cell as u32);
+                }
+            }
+            GoalLayer { goal: g.name.clone(), weight: g.weight, must: g.must, heat: HeatGrid { values, ..heat.clone() }, gate }
+        })
+        .collect()
+}
+
+/// The funnel's counts: cells in the area, cells with somewhere to stand, then what's left
+/// after each gating goal, in the order the funnel runs them.
+fn stages_of(funnel: &Funnel, scored: &[Scored], in_area: usize) -> Vec<Stage> {
+    let fixed = [("Points in the area", in_area), ("Somewhere to stand", scored.len())];
+    let fixed = fixed.into_iter().map(|(label, n)| Stage { label: label.into(), n: n as u32, goal: None });
+    let gates = funnel.gated.iter().enumerate().map(|(k, &i)| {
+        let g = funnel.goals[i].goal;
+        let n = scored.iter().filter(|s| s.eval.dropped.map_or(true, |d| d > k)).count();
+        Stage { label: stage_label(g), n: n as u32, goal: Some(g.name.clone()) }
+    });
+    fixed.chain(gates).collect()
+}
+
+/// A gate's plain words: the start of the cost function's `about` (up to a colon), or its name.
+fn stage_label(g: &Ready) -> String {
+    let head = g.cost.about.split([':', ';']).next().unwrap_or("").trim();
+    let words = if head.is_empty() { g.name.as_str() } else { head };
+    let mut c = words.chars();
+    c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+}
+
+/// Every object any goal's choices name, each once, in order of first use.
+fn used_objects(choices: &[Choices], objects: &[Object]) -> Vec<Object> {
+    let mut seen: Vec<usize> = Vec::new();
+    for &i in choices.iter().flatten().flatten() {
+        if !seen.contains(&i) {
+            seen.push(i);
+        }
+    }
+    seen.into_iter().map(|i| objects[i].clone()).collect()
 }
 
 // ---- the sun's path ---------------------------------------------------------------------
@@ -305,6 +382,23 @@ impl HeatLayout {
         Some(offset_latlon(self.center_lat, self.center_lon, east, north))
     }
 
+    /// Lat/lon of the centre of heat cell `i`, inside the area or not.
+    fn centre(&self, i: usize) -> (f64, f64) {
+        let half = f64::from(self.side) / 2.0;
+        let (col, row) = ((i as u32 % self.side) as f64, (i as u32 / self.side) as f64);
+        offset_latlon(self.center_lat, self.center_lon, (col + 0.5 - half) * self.cell_m, (half - row - 0.5) * self.cell_m)
+    }
+
+    /// The heat cell holding (lat, lon), if it's on the grid.
+    fn cell_at(&self, lat: f64, lon: f64) -> Option<usize> {
+        let north = (lat - self.center_lat).to_radians() * EARTH_R;
+        let east = (lon - self.center_lon).to_radians() * EARTH_R * self.center_lat.to_radians().cos();
+        let half = f64::from(self.side) / 2.0;
+        let (col, row) = ((east / self.cell_m + half).floor(), (half - north / self.cell_m).floor());
+        let side = f64::from(self.side);
+        ((0.0..side).contains(&col) && (0.0..side).contains(&row)).then(|| (row as u32 * self.side + col as u32) as usize)
+    }
+
     fn heat_grid(&self, lat: f64, lon: f64) -> HeatGrid {
         HeatGrid {
             center_lat: lat,
@@ -401,28 +495,38 @@ fn standing_ok(wanted: Standing, got: Standing) -> bool {
 
 // ---- picking and spots ------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Scored {
-    /// Heat cell, or `layout.len() + k` for the k-th marched point.
+    /// The heat cell it stands for.
     cell: usize,
+    /// Where it is: the cell's centre, or a marched point inside the cell.
     lat: f64,
     lon: f64,
     site: Site,
-    raw: f64,
+    eval: Eval,
 }
 
-/// The best `n` candidates with a positive score, each at least `spacing_m` from those
-/// already picked. Ties go to the earlier (more northern, then western) cell, so it's stable.
-fn pick(scored: &[Scored], n: usize, spacing_m: f64) -> Vec<Scored> {
-    let mut order: Vec<&Scored> = scored.iter().filter(|s| s.raw > 0.0).collect();
-    order.sort_by(|a, b| b.raw.total_cmp(&a.raw).then(a.cell.cmp(&b.cell)));
-    let mut picked: Vec<Scored> = Vec::with_capacity(n);
+impl Scored {
+    /// Should `self` stand for its cell instead of `old`? A higher score wins; on a tie, a
+    /// candidate no gate drops beats one that's dropped; otherwise the earlier one stays.
+    fn beats(&self, old: &Scored) -> bool {
+        self.eval.raw > old.eval.raw || (self.eval.raw == old.eval.raw && self.eval.dropped.is_none() && old.eval.dropped.is_some())
+    }
+}
+
+/// The best `n` candidates with a positive score, their cell centres at least `spacing_m` from
+/// those already picked. Ties go to the earlier (more northern, then western) cell, so it's
+/// stable. The browser repeats this from the layers (docs/contracts.md#goal-layers-and-stages).
+fn pick<'s>(scored: &'s [Scored], layout: &HeatLayout, n: usize, spacing_m: f64) -> Vec<&'s Scored> {
+    let mut order: Vec<&Scored> = scored.iter().filter(|s| s.eval.raw > 0.0).collect();
+    order.sort_by(|a, b| b.eval.raw.total_cmp(&a.eval.raw).then(a.cell.cmp(&b.cell)));
+    let mut picked: Vec<&Scored> = Vec::with_capacity(n);
     for s in order {
         if picked.len() == n {
             break;
         }
-        if picked.iter().all(|p| metres_between((p.lat, p.lon), (s.lat, s.lon)) >= spacing_m) {
-            picked.push(*s);
+        if picked.iter().all(|p| metres_between(layout.centre(p.cell), layout.centre(s.cell)) >= spacing_m) {
+            picked.push(s);
         }
     }
     picked
@@ -497,6 +601,19 @@ struct GoalRun<'a> {
     checks: Vec<&'a Node>,
 }
 
+/// One candidate through the funnel.
+#[derive(Debug, Clone, PartialEq)]
+struct Eval {
+    /// Per goal, its score (its best passing choice); `None` for the goals a gate cut off.
+    values: Vec<Option<f64>>,
+    /// The ranking score (0 if dropped).
+    raw: f64,
+    /// Which gate (index into `Funnel::gated`) dropped it.
+    dropped: Option<usize>,
+    /// The goal whose cost function's own `must` dropped it (not just the goal being a must).
+    gate: Option<usize>,
+}
+
 /// The brief's goals, arranged for the candidate loop.
 struct Funnel<'a> {
     goals: Vec<GoalRun<'a>>,
@@ -527,12 +644,37 @@ impl<'a> Funnel<'a> {
         Funnel { goals: runs, gated, ranked }
     }
 
-    /// The candidate's ranking score, or None if a gate drops it. `value(call, choice)` is a
-    /// feature's number with the goal's objects as picked by `choice`.
-    fn rank(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Option<f64> {
-        let passing = self.passing(value)?;
+    /// Run a candidate through the gates, then score every goal. `value(call, choice)` is a
+    /// feature's number with the goal's objects as picked by `choice`. At the first gate that
+    /// drops it, that goal gets 0 and the rest aren't computed.
+    fn evaluate(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Eval {
+        let n = self.goals.len();
+        let mut passing = vec![u64::MAX; n];
+        for (k, &i) in self.gated.iter().enumerate() {
+            let mask = self.mask(i, value);
+            if mask == 0 {
+                let mut values = vec![None; n];
+                values[i] = Some(0.0);
+                let gate = self.fn_gate_fails(i, value).then_some(i);
+                return Eval { values, raw: 0.0, dropped: Some(k), gate };
+            }
+            passing[i] = mask;
+        }
+        let values: Vec<f64> = (0..n).map(|i| self.best(i, passing[i], value).1).collect();
         // reduce, not a fold from 0.0: one goal of weight 1 gives back its score bit for bit.
-        Some(self.ranked.iter().map(|&(i, w)| w * self.best(i, passing[i], value).1).reduce(|a, b| a + b).unwrap_or(0.0))
+        let raw = self.ranked.iter().map(|&(i, w)| w * values[i]).reduce(|a, b| a + b).unwrap_or(0.0);
+        Eval { values: values.into_iter().map(Some).collect(), raw, dropped: None, gate: None }
+    }
+
+    /// Goal `i` dropped a candidate: was it its cost function's own `must` (no choice passes it),
+    /// rather than only its score being 0 on a must goal?
+    fn fn_gate_fails(&self, i: usize, value: &mut impl FnMut(Call, &[usize]) -> f64) -> bool {
+        let run = &self.goals[i];
+        match &run.goal.cost.must {
+            None => false,
+            Some(_) if !run.goal.must => true,
+            Some(m) => run.choices.iter().all(|choice| score_of(m, &mut |c| value(c, choice)) <= 0.0),
+        }
     }
 
     /// For each goal, the choice of objects that scores best among those passing its checks
@@ -547,19 +689,25 @@ impl<'a> Funnel<'a> {
     fn passing(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Option<Vec<u64>> {
         let mut passing = vec![u64::MAX; self.goals.len()];
         for &i in &self.gated {
-            let run = &self.goals[i];
-            let mut mask = 0u64;
-            for (k, choice) in run.choices.iter().enumerate() {
-                if run.checks.iter().all(|n| score_of(n, &mut |c| value(c, choice)) > 0.0) {
-                    mask |= 1 << k;
-                }
-            }
+            let mask = self.mask(i, value);
             if mask == 0 {
                 return None;
             }
             passing[i] = mask;
         }
         Some(passing)
+    }
+
+    /// Bit mask of goal `i`'s choices that pass all its checks.
+    fn mask(&self, i: usize, value: &mut impl FnMut(Call, &[usize]) -> f64) -> u64 {
+        let run = &self.goals[i];
+        let mut mask = 0u64;
+        for (k, choice) in run.choices.iter().enumerate() {
+            if run.checks.iter().all(|n| score_of(n, &mut |c| value(c, choice)) > 0.0) {
+                mask |= 1 << k;
+            }
+        }
+        mask
     }
 
     /// (choice, score) of goal `i`'s best choice among those in `mask`.
@@ -1057,7 +1205,9 @@ mod tests {
         let scene = Scene { grid: &g, track: &track, objects: &[], lens_deg: 60.0, top_m: 0.0, n_az: 0 };
         // No skyline buffer: tracing one would panic. A ground spot fails the roof gate first.
         let mut probe = Probe::new(&scene, LAT, LON, ground, None);
-        assert_eq!(funnel.rank(&mut |c, ch| probe.value(c, ch)), None);
+        let e = funnel.evaluate(&mut |c, ch| probe.value(c, ch));
+        // dropped at the first gate (the roof, goal 1), by the goal being a must, not its function's own gate
+        assert_eq!(e, Eval { values: vec![None, Some(0.0)], raw: 0.0, dropped: Some(0), gate: None });
     }
 
     // ---- objects ----
@@ -1110,10 +1260,51 @@ mod tests {
         assert!(top.scores[0].why.starts_with("a in the foreground of b"), "{}", top.scores[0].why);
         assert!(top.scores[0].why.contains("visible(b)"), "{}", top.scores[0].why);
         assert!(top.scores[0].why.ends_with("[a: vexcel:fountain:1, b: costar:1]"), "{}", top.scores[0].why);
-        // Marching added candidates beyond the heat grid, south of the fountain.
+        // Marching added candidates off the cell centres; they fold into the heat grid's cells.
         let plain = search(&g, &brief(300.0, Standing::Ground, Framing::Clear), PDT).unwrap();
-        assert!(out.searched > plain.searched + 50, "{} vs {}", out.searched, plain.searched);
+        assert!(out.searched >= plain.searched, "{} vs {}", out.searched, plain.searched);
         assert_eq!(out.heat.values.len(), plain.heat.values.len());
+    }
+
+    #[test]
+    fn layers_hold_each_goal_and_gates_short_circuit() {
+        let (g, objs) = plaza(false);
+        // in_front's own `must` gates (whatever the goal says); the sun ranks.
+        let goals = r#"[{"use":"sun_clear"},{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"id":"costar:1"}},"weight":0.5}]"#;
+        let out = object_search(&g, &objs, 300.0, goals).unwrap();
+        let [sun, front] = &out.layers[..] else { panic!("{} layers", out.layers.len()) };
+        assert_eq!((sun.goal.as_str(), sun.weight, sun.must), ("sun_clear", 1.0, false));
+        assert_eq!((front.goal.as_str(), front.weight, front.must), ("in_front", 0.5, false));
+        assert!(sun.gate.is_empty() && !front.gate.is_empty());
+        let searched = out.heat.values.iter().filter(|v| v.is_some()).count();
+        assert_eq!(searched as u32, out.searched);
+        for i in 0..out.heat.values.len() {
+            let (h, s, f) = (out.heat.values[i], sun.heat.values[i], front.heat.values[i]);
+            if front.gate.contains(&(i as u32)) {
+                // dropped by in_front's gate: 0 there, the sun never ran, the heat is 0
+                assert_eq!((h, s, f), (Some(0.0), None, Some(0.0)), "cell {i}");
+            } else {
+                assert_eq!((s.is_some(), f.is_some()), (h.is_some(), h.is_some()), "cell {i}");
+            }
+        }
+        let labels: Vec<(&str, u32, Option<&str>)> = out.stages.iter().map(|s| (s.label.as_str(), s.n, s.goal.as_deref())).collect();
+        let kept = out.searched - front.gate.len() as u32;
+        assert_eq!(labels[1..], [("Somewhere to stand", out.searched, None), ("A in the foreground of b", kept, Some("in_front"))]);
+        assert_eq!(labels[0].0, "Points in the area");
+        assert!(labels[0].1 >= out.searched);
+        assert_eq!(out.objects.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["vexcel:fountain:1", "costar:1"]);
+        assert_eq!(out.spacing_m, MIN_SPACING_M.max(2.0 * out.heat.cell_m));
+    }
+
+    #[test]
+    fn cell_at_finds_the_cell_of_its_centre() {
+        let layout = HeatLayout::for_area(LAT, LON, 300.0);
+        for i in [0, 1, 39, 40, 777, layout.len() - 1] {
+            let (lat, lon) = layout.centre(i);
+            assert_eq!(layout.cell_at(lat, lon), Some(i));
+        }
+        let (lat, lon) = layout.centre(0);
+        assert_eq!(layout.cell_at(lat + 0.01, lon), None, "north of the grid");
     }
 
     #[test]
