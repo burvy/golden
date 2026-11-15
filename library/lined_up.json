@@ -1,0 +1,14 @@
+{
+  "name": "lined_up",
+  "about": "a stacked in front of b: same bearing, a nearer, the top of b still showing",
+  "params": ["a", "b"],
+  "must": { "op": "and", "of": [
+    { "op": "bump", "x": { "f": "bearing_diff", "a": "a", "b": "b" }, "at": 0, "width": 10 },
+    { "op": "lt", "x": { "f": "dist", "obj": "a" }, "than": { "f": "dist", "obj": "b" } }
+  ] },
+  "score": { "op": "avg", "of": [
+    { "op": "bump", "x": { "f": "bearing_diff", "a": "a", "b": "b" }, "at": 0, "width": 5 },
+    { "f": "visible", "obj": "a" },
+    { "op": "ramp", "x": { "f": "visible", "obj": "b" }, "lo": 0, "hi": 0.4 }
+  ] }
+}

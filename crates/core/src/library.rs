@@ -4,7 +4,7 @@
 //! search with no library at hand (and every brief without goals) behaves as before. The server
 //! adds saved entries on top and passes the whole list to `search::search_with`.
 
-use contracts::{Brief, CostFn, Framing, Goal, GoalFn};
+use contracts::{Brief, CostFn, Framing, Goal, GoalFn, ObjArg, ObjRef};
 
 use crate::expr::{check, Checked, ExprError};
 
@@ -13,6 +13,11 @@ const SEEDS: &[(&str, &str)] = &[
     ("sun_clear.json", include_str!("../../../library/sun_clear.json")),
     ("sun_between.json", include_str!("../../../library/sun_between.json")),
     ("sun_behind.json", include_str!("../../../library/sun_behind.json")),
+    ("in_front.json", include_str!("../../../library/in_front.json")),
+    ("lined_up.json", include_str!("../../../library/lined_up.json")),
+    ("between.json", include_str!("../../../library/between.json")),
+    ("beside.json", include_str!("../../../library/beside.json")),
+    ("fills.json", include_str!("../../../library/fills.json")),
 ];
 
 /// The built-in cost functions.
@@ -46,6 +51,8 @@ pub fn goals_of(brief: &Brief) -> Vec<Goal> {
 pub struct Ready {
     pub name: String,
     pub cost: Checked,
+    /// `cost.refs` with the goal's `args` filled in: the object reference for each slot.
+    pub refs: Vec<ObjRef>,
     pub weight: f64,
     pub must: bool,
 }
@@ -57,7 +64,9 @@ pub fn ready(goals: &[Goal], library: &[CostFn]) -> Result<Vec<Ready>, Vec<ExprE
     for (i, goal) in goals.iter().enumerate() {
         let at = format!("goals[{i}]");
         match ready_one(goal, library, &at) {
-            Ok(cost) => out.push(Ready { name: goal.name().to_string(), cost, weight: goal.weight_or_default(), must: goal.must }),
+            Ok((cost, refs)) => {
+                out.push(Ready { name: goal.name().to_string(), cost, refs, weight: goal.weight_or_default(), must: goal.must })
+            }
             Err(mut e) => errors.append(&mut e),
         }
     }
@@ -68,10 +77,14 @@ pub fn ready(goals: &[Goal], library: &[CostFn]) -> Result<Vec<Ready>, Vec<ExprE
     }
 }
 
-fn ready_one(goal: &Goal, library: &[CostFn], at: &str) -> Result<Checked, Vec<ExprError>> {
+fn ready_one(goal: &Goal, library: &[CostFn], at: &str) -> Result<(Checked, Vec<ObjRef>), Vec<ExprError>> {
     let err = |path: String, msg: String| vec![ExprError { at: path, msg }];
-    let (cost, path) = match &goal.cost {
-        GoalFn::Def(f) => (f, format!("{at}.def")),
+    let none = std::collections::BTreeMap::new();
+    let (cost, path, args) = match &goal.cost {
+        GoalFn::Def(f) if !f.params.is_empty() => {
+            return Err(err(format!("{at}.def.params"), "an inline cost function gets no args, so it can't have params; write the objects into the expression, like {\"kind\": \"tree\"}".into()));
+        }
+        GoalFn::Def(f) => (f, format!("{at}.def"), &none),
         GoalFn::Use { name, args } => {
             let Some(f) = library.iter().find(|f| &f.name == name) else {
                 let names: Vec<&str> = library.iter().map(|f| f.name.as_str()).collect();
@@ -83,10 +96,19 @@ fn ready_one(goal: &Goal, library: &[CostFn], at: &str) -> Result<Checked, Vec<E
             if let Some(missing) = f.params.iter().find(|p| !args.contains_key(*p)) {
                 return Err(err(format!("{at}.args"), format!("\"{name}\" needs an object for \"{missing}\"")));
             }
-            (f, at.to_string())
+            (f, at.to_string(), args)
         }
     };
-    check(cost).map_err(|errs| errs.into_iter().map(|e| ExprError { at: format!("{path}.{}", e.at), msg: e.msg }).collect())
+    let checked = check(cost).map_err(|errs| errs.into_iter().map(|e| ExprError { at: format!("{path}.{}", e.at), msg: e.msg }).collect::<Vec<_>>())?;
+    let refs = checked
+        .refs
+        .iter()
+        .map(|r| match r {
+            ObjArg::Param(p) => args[p].clone(), // check() and the args check above guarantee it
+            ObjArg::Ref(o) => o.clone(),
+        })
+        .collect();
+    Ok((checked, refs))
 }
 
 #[cfg(test)]
@@ -100,7 +122,10 @@ mod tests {
         assert_eq!(lib.len(), SEEDS.len());
         for (f, (file, _)) in lib.iter().zip(SEEDS) {
             assert_eq!(format!("{}.json", f.name), *file);
-            assert_eq!(check(f).unwrap().tier(), Tier::Skyline);
+            let c = check(f).unwrap_or_else(|e| panic!("{file}: {e:?}"));
+            let want = if f.name.starts_with("sun_") { Tier::Skyline } else { Tier::Ray };
+            assert_eq!(c.tier(), want, "{file}");
+            assert_eq!(c.refs.len(), f.params.len(), "{file}: relation seeds use every param, and only params");
         }
         for framing in [Framing::Clear, Framing::Between, Framing::Behind] {
             assert!(lib.iter().any(|f| f.name == sun_goal_name(framing)));
@@ -121,6 +146,21 @@ mod tests {
         assert!(text[0].starts_with("goals[1].use: no cost function \"sun_sideways\""), "{text:?}");
         assert!(text[1].starts_with("goals[2].args: \"sun_clear\" has no parameter \"a\""), "{text:?}");
         assert!(text[2].starts_with("goals[3].def.score: unknown feature \"nope\""), "{text:?}");
+    }
+
+    #[test]
+    fn args_fill_the_slots() {
+        let goals: Vec<Goal> = serde_json::from_str(
+            r#"[{"use":"in_front","args":{"a":{"kind":"tree"},"b":{"id":"costar:1"}}},
+                {"def":{"name":"x","about":"x","params":["a"],"score":{"f":"dist","obj":"a"}}}]"#,
+        )
+        .unwrap();
+        let errs = ready(&goals, &seeds()).unwrap_err();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].to_string().starts_with("goals[1].def.params: an inline cost function gets no args"), "{errs:?}");
+        let r = ready(&goals[..1], &seeds()).unwrap();
+        let want: Vec<ObjRef> = serde_json::from_str(r#"[{"kind":"tree"},{"id":"costar:1"}]"#).unwrap();
+        assert_eq!(r[0].refs, want);
     }
 
     #[test]
