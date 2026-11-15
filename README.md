@@ -49,6 +49,7 @@ Set these as environment variables. **Never commit their values.**
 | `GOOGLE_MAPS_API_KEY` | Photo-match agent's place search (Places API (New): coordinates, place photos). Same `env/.env` | Landmarks via Esri's geocoder, no place photos |
 | `ANTHROPIC_API_KEY` | The agent (`POST /api/agent`) reads the brief and writes the call sheet with Claude. Get one at platform.claude.com; put it in `env/.env` or point `ANTHROPIC_ENV_FILE` at it. Never printed or logged | The agent runs as the offline mock (rule reader + templates; every number is the same) |
 | `GOLDEN_CLAUDE_MODEL` | Claude model ID for the agent | `claude-sonnet-5-5` |
+| `GOLDEN_OFFLINE`, `GOLDEN_CLAUDE*`, `GOLDEN_RATE*`, ... | Public-server guards | See "Going live" |
 | `COSTAR_KIT_DIR` | Path to the CoStar data kit (kept out of git) | Building lookups use fixtures |
 
 PowerShell example (current window only):
@@ -57,6 +58,38 @@ $env:VEXCEL_ENV_FILE = "$PWD\env\vexcel.env"      # just the key, or VEXCEL_API_
 $env:ANTHROPIC_ENV_FILE = "$PWD\env\claude.env"   # just the key, or ANTHROPIC_API_KEY=...
 cargo run -p vexcel --example fetch_dsm -- 34.049 -118.251 60   # lat lon radius_m: checks the key works
 ```
+
+## Going live (burvy.dev)
+A public server must not let visitors start downloads, fill the disk or spend Claude credit. Run it cache only,
+behind the guards in `crates/server/src/guard.rs`:
+
+```powershell
+$env:GOLDEN_OFFLINE = "1"                          # never download: Vexcel, USGS LiDAR, Google, detection
+$env:VEXCEL_CACHE_DIR = "D:\golden-cache"       # the pre-fetched demo areas (Downtown LA, Princeton)
+$env:GOLDEN_CLAUDE_DAILY_MAX = "300"               # Claude calls a day for the whole site (or GOLDEN_CLAUDE=off)
+$env:GOLDEN_TRUST_PROXY = "1"                      # only if a reverse proxy / tunnel sits in front
+$env:GOLDEN_ADDR = "127.0.0.1:8787"                # the proxy connects here
+cargo run --release -p server
+```
+
+| Variable | What it does | Default |
+|---|---|---|
+| `GOLDEN_OFFLINE` | `1`: cache only. Cached areas work as usual; anything else is a 503 "only serves cached demo areas". The Vexcel and Google keys are ignored, LiDAR doesn't download | off |
+| `GOLDEN_CLAUDE` | `off`: never call Claude; the agent and chat use the offline reader | on (if a key is set) |
+| `GOLDEN_CLAUDE_DAILY_MAX` | Claude calls per UTC day, whole server; past it, the offline reader until midnight UTC | 300 |
+| `GOLDEN_RATE_AI_PER_MIN` | Per IP: `/api/chat`, `/api/agent` (burst 2x) | 6 |
+| `GOLDEN_RATE_HEAVY_PER_MIN` | Per IP: search, horizon, scene, photo (burst 2x) | 30 |
+| `GOLDEN_RATE_PER_MIN` | Per IP: every other `/api/*` call (tiles, mesh, `.bin`/`.jpg` and the web app are not limited) | 300 |
+| `GOLDEN_HEAVY_CONCURRENCY` | AI + heavy requests running at once; others queue up to 30 s, then 503 | 4 |
+| `GOLDEN_TRUST_PROXY` | `1`: client IP from `CF-Connecting-IP` / `X-Real-IP` / last `X-Forwarded-For`. Without it, behind a proxy everyone shares one bucket. Don't set it when clients connect directly (they could fake the header) | off |
+| `GOLDEN_CORS_ORIGINS` | Comma list of origins that may call the API from their pages (`off` for none) | `https://burvy.dev,https://www.burvy.dev` |
+| `GOLDEN_WARM` | `0`: don't load the preset demo grids at startup (normally ~10 s in the background, so the first search is fast) | on |
+
+Over the limit: 429 with `Retry-After`. The startup log prints one `guard:` line with the settings in force.
+
+Disk: offline, the only thing written is `cache/scene/<id>.bin` (one per distinct 3D view, a few hundred KB to a
+few MB). Delete `<cache>/scene/` any time to reclaim it; scenes are rebuilt on demand. In memory, at most 4 height
+grids and 32 scenes are kept.
 
 ## How it works
 <!-- TODO by H20: 4–5 plain steps, e.g. -->
