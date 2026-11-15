@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for framing in FRAMINGS {
             let brief = Brief {
                 text: String::new(),
-                area: Area { lat, lon, radius_m },
+                area: Area { lat, lon, radius_m, name: None },
                 date: date.to_string(),
                 tz: contracts::search::DEFAULT_TZ.to_string(),
                 event: Event::Sunset,
