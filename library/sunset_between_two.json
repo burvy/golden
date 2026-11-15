@@ -1,6 +1,6 @@
 {
   "name": "sunset_between_two",
-  "about": "Sun sets between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 5-145 deg, where the sun can't be) drops points before any skyline is traced, so use it as a must",
+  "about": "Sun sets between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 5-145 deg, where the sun can't be) drops points before any skyline is traced, so use it as a must. For briefs like 'the sun sets between two towers (lab: between-towers)'",
   "params": ["a", "b"],
   "must": { "op": "and", "of": [
     { "op": "gt", "x": { "f": "in_frame", "a": "a", "b": "b" }, "than": { "num": 0 } },

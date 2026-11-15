@@ -18,6 +18,18 @@ const SEEDS: &[(&str, &str)] = &[
     ("between.json", include_str!("../../../library/between.json")),
     ("beside.json", include_str!("../../../library/beside.json")),
     ("fills.json", include_str!("../../../library/fills.json")),
+    // Proven in the library lab (docs/library-lab.md, promote list): 100% recall@10 in every tested run.
+    ("open_horizon.json", include_str!("../../../library/open_horizon.json")),
+    ("sun_wide_gap.json", include_str!("../../../library/sun_wide_gap.json")),
+    ("sunset_behind.json", include_str!("../../../library/sunset_behind.json")),
+    ("sunset_beside.json", include_str!("../../../library/sunset_beside.json")),
+    ("sunset_between_two.json", include_str!("../../../library/sunset_between_two.json")),
+    ("tower_lit_at_sunset.json", include_str!("../../../library/tower_lit_at_sunset.json")),
+    ("sunrise_between_two.json", include_str!("../../../library/sunrise_between_two.json")),
+    ("tower_lit_at_sunrise.json", include_str!("../../../library/tower_lit_at_sunrise.json")),
+    ("sunrise_beside.json", include_str!("../../../library/sunrise_beside.json")),
+    ("sunrise_behind.json", include_str!("../../../library/sunrise_behind.json")),
+    ("towers_over.json", include_str!("../../../library/towers_over.json")),
 ];
 
 /// The built-in cost functions.
@@ -123,8 +135,12 @@ mod tests {
         for (f, (file, _)) in lib.iter().zip(SEEDS) {
             assert_eq!(format!("{}.json", f.name), *file);
             let c = check(f).unwrap_or_else(|e| panic!("{file}: {e:?}"));
-            let want = if f.name.starts_with("sun_") { Tier::Skyline } else { Tier::Ray };
-            assert_eq!(c.tier(), want, "{file}");
+            // Sun-only seeds read the skyline; relation seeds need at least a ray (line of sight).
+            if f.params.is_empty() {
+                assert_eq!(c.tier(), Tier::Skyline, "{file}");
+            } else {
+                assert!(c.tier() >= Tier::Ray, "{file}: {:?}", c.tier());
+            }
             assert_eq!(c.refs.len(), f.params.len(), "{file}: relation seeds use every param, and only params");
         }
         for framing in [Framing::Clear, Framing::Between, Framing::Behind] {

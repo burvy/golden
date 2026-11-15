@@ -1,6 +1,6 @@
 {
   "name": "sunrise_beside",
-  "about": "Sun rises beside it: within 15 deg of a. Its must (a at bearing 30-180 deg) drops points before any skyline is traced, so use it as a must",
+  "about": "Sun rises beside it: within 15 deg of a. Its must (a at bearing 30-180 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'the sun rises beside the tower (lab: sunrise-by-tower)'",
   "params": [
     "a"
   ],

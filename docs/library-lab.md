@@ -365,6 +365,8 @@ but proves nothing. So the promote list below gives the runs that had spots.
 
 ## Promote list (for SEEDS)
 
+All 11 are in core's SEEDS since task 070 (each `about` names its brief), and 053 is merged, so the object entries bind too. The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
+
 Ranked for the demo. "Works today" means it needs no objects. On main the server passes
 `objects: &[]`, so an entry with an object param can't bind until Ray's 053 (object sources) merges.
 Every entry below has 100% recall@10 in every run. "Tested" counts the runs whose ungated search found

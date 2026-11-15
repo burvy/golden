@@ -1,6 +1,6 @@
 {
   "name": "sun_wide_gap",
-  "about": "The sun sets into a wide opening (6-20 deg, best 9-14) between tall sides and stays in view in it to within 2 deg of the horizon: the skyline frames the sun with room around it. Sun only, no objects needed",
+  "about": "The sun sets into a wide opening (6-20 deg, best 9-14) between tall sides and stays in view in it to within 2 deg of the horizon: the skyline frames the sun with room around it. Sun only, no objects needed. For briefs like 'the sun framed by the skyline, with room around it (lab: wide-gap)'",
   "must": { "op": "gt", "x": { "f": "gap_width_deg" }, "than": { "num": 6 } },
   "score": { "op": "mul", "of": [
     { "op": "and", "of": [

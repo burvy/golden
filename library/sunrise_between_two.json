@@ -1,6 +1,6 @@
 {
   "name": "sunrise_between_two",
-  "about": "Sun rises between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 215-355 deg, where the rising sun can't be) drops points before any skyline is traced, so use it as a must",
+  "about": "Sun rises between a and b, both in one frame (in front of you, not behind). Its must (a and b in one frame, neither at bearing 215-355 deg, where the rising sun can't be) drops points before any skyline is traced, so use it as a must. For briefs like 'the sun rises between two towers (lab: sunrise-between-towers)'",
   "params": ["a", "b"],
   "must": { "op": "and", "of": [
     { "op": "gt", "x": { "f": "in_frame", "a": "a", "b": "b" }, "than": { "num": 0 } },

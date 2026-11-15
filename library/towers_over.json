@@ -1,6 +1,6 @@
 {
   "name": "towers_over",
-  "about": "a towers over you (a low-angle shot looking up): at least 25 deg tall, best from 35, and in view. Its must (25 deg tall) drops points before any line-of-sight march",
+  "about": "a towers over you (a low-angle shot looking up): at least 25 deg tall, best from 35, and in view. Its must (25 deg tall) drops points before any line-of-sight march. For briefs like 'low angle, looking up at the tower (lab: looking-up)'",
   "params": ["a"],
   "must": { "op": "gt", "x": { "f": "size_deg", "obj": "a" }, "than": { "num": 25 } },
   "score": { "op": "mul", "of": [
