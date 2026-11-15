@@ -30,7 +30,12 @@ pub struct Claude {
 }
 
 impl Claude {
+    /// `None` (the offline reader runs instead) without a key, with `GOLDEN_CLAUDE=off`, or once today's
+    /// `GOLDEN_CLAUDE_DAILY_MAX` is spent (`guard.rs`).
     pub fn from_env(http: &reqwest::Client) -> Option<Claude> {
+        if !crate::guard::get().claude_allowed() {
+            return None;
+        }
         let key = secrets::get("ANTHROPIC_API_KEY")?;
         let model = secrets::get("GOLDEN_CLAUDE_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string());
         let base_url = secrets::get("ANTHROPIC_BASE_URL").unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
@@ -43,6 +48,7 @@ impl Claude {
 
     /// One prompt in, one JSON object out (matching `schema`, a JSON Schema with `additionalProperties: false`).
     pub async fn json(&self, prompt: &str, schema: Value) -> Result<Value, String> {
+        crate::guard::get().claude_take()?;
         let mut req = self
             .http
             .post(format!("{}/v1/messages", self.base_url))
