@@ -85,6 +85,7 @@ impl IntoResponse for ApiErr {
 impl From<HeightsError> for ApiErr {
     fn from(e: HeightsError) -> ApiErr {
         match &e {
+            HeightsError::NoData { lidar: lidar::Error::Offline(_), .. } => crate::guard::offline_err("no height map here"),
             HeightsError::NoData { .. } => ApiErr::unprocessable(format!("no height data here ({e})")),
             HeightsError::Vexcel(vexcel::Error::NoKey) => ApiErr(StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
             HeightsError::Vexcel(vexcel::Error::TooLarge(_)) => ApiErr::bad(e.to_string()),

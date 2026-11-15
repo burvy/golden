@@ -16,6 +16,7 @@
 //! Heights come from Vexcel where our key covers (LA, Houston, Princeton...), else USGS LiDAR (`heights.rs`).
 //! Binds 127.0.0.1:8787; set `GOLDEN_ADDR=0.0.0.0:8787` to try it from a phone on the same Wi-Fi.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
@@ -23,6 +24,7 @@ use tower_http::services::ServeDir;
 
 mod agent;
 mod api;
+mod guard;
 mod heights;
 mod mesh;
 mod scene;
@@ -52,19 +54,27 @@ async fn main() {
             "no key (VEXCEL_API_KEY / VEXCEL_ENV_FILE): cache only (cached ~0.9 m tiles stand in for missing 6 cm ones); USGS LiDAR where nothing is cached"
         }
     );
+    println!("{}", guard::get().summary());
+    guard::warm(state.clone());
     println!("golden on http://{addr}  (web app at /, API under /api)");
-    axum::serve(listener, app(state)).await.expect("server crashed");
+    axum::serve(listener, app(state).into_make_service_with_connect_info::<SocketAddr>()).await.expect("server crashed");
 }
 
 fn app(state: Arc<state::AppState>) -> Router {
     let web = std::env::var("GOLDEN_WEB_DIR").unwrap_or_else(|_| "web".to_string());
-    Router::new()
+    let g = guard::get();
+    let router = Router::new()
         .route("/api/health", axum::routing::get(|| async { "ok" }))
         .merge(api::routes(state.clone()))
         .merge(agent::routes(state.clone()))
         .merge(mesh::routes(state))
         .merge(tiles::routes())
         .fallback_service(ServeDir::new(web))
+        .layer(axum::middleware::from_fn_with_state(g, guard::limit));
+    match guard::cors(g) {
+        Some(cors) => router.layer(cors),
+        None => router,
+    }
 }
 
 #[cfg(test)]
