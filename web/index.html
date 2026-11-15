@@ -96,6 +96,7 @@ main>section,main>aside{min-height:0;overflow:auto}
 #legend .pins button{margin-left:6px;border:1px solid var(--sun);background:#fff;color:var(--sun-ink);border-radius:99px;padding:3px 10px;font-weight:600;font-size:12.5px;min-height:30px}
 .mapctl{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
 .mapctl button{width:40px;height:40px;border:0;border-radius:10px;background:rgba(255,255,255,.94);box-shadow:0 1px 3px rgba(12,42,67,.25);font:700 20px/1 "Instrument Sans",sans-serif;color:var(--ink)}
+.mapctl button[aria-pressed=true]{background:var(--sky-deep);color:#fff}
 .mapctl svg{width:18px;height:18px;vertical-align:middle}
 #searcharea{position:absolute;left:50%;top:56px;transform:translateX(-50%);border:0;border-radius:99px;padding:9px 18px;font-weight:700;min-height:42px;
  background:linear-gradient(180deg,var(--sun2),var(--sun));color:var(--on-sun);box-shadow:0 2px 10px rgba(12,42,67,.35)}
@@ -242,7 +243,7 @@ button[disabled]{opacity:.55;cursor:default}
       <canvas id="map" aria-label="Map of candidate points, coloured by score"></canvas>
       <div id="layers" role="toolbar" aria-label="Map layer"></div>
       <div id="legend" hidden></div>
-      <div class="mapctl"><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" id="zout" aria-label="Zoom out">&minus;</button><button type="button" id="zfit" aria-label="Back to the searched area" title="Back to the searched area"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg></button></div>
+      <div class="mapctl"><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" id="zout" aria-label="Zoom out">&minus;</button><button type="button" id="zdrop" data-needs-server aria-pressed="false" aria-label="3D view anywhere: then click the map" title="3D view anywhere: click this, then click the map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9z"/><path d="M12 11l8-4.5M12 11v9M12 11L4 6.5"/></svg></button><button type="button" id="zfit" aria-label="Back to the searched area" title="Back to the searched area"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg></button></div>
       <button type="button" id="searcharea" hidden data-needs-server>Search this area</button>
       <div id="busy" role="status" hidden></div>
       <div class="attrib" id="attrib"></div>

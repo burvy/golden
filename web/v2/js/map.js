@@ -18,10 +18,10 @@ const unworld = (x, y, z) => {
 const mPerPx = (lat, z) => 156543.03392 * Math.cos(rad(lat)) / 2 ** z;
 const tiles = new Map();
 
-export function createMap(canvas, { base, onPick, onSearchArea, onMove }) {
+export function createMap(canvas, { base, onPick, onSearchArea, onMove, onDrop }) {
   const ctx = canvas.getContext('2d'), off = document.createElement('canvas');
   const view = { lat: 34.0493, lon: -118.2508, z: 16 };
-  let data = null, tilesOk = !!base, searched = null, raf = 0;
+  let data = null, tilesOk = !!base, searched = null, raf = 0, dropping = false;
 
   const size = () => ({ W: canvas.clientWidth, H: canvas.clientHeight });
   function toPx(lat, lon) {
@@ -151,7 +151,7 @@ export function createMap(canvas, { base, onPick, onSearchArea, onMove }) {
   const up = e => {
     pts.delete(e.pointerId);
     if (tap && e.type === 'pointerup' && performance.now() - tap.t < 500) click(e);
-    tap = null; drag = pts.size === 2 || (e.pointerType === 'mouse' && pts.size) ? gesture() : null; canvas.style.cursor = '';
+    tap = null; drag = pts.size === 2 || (e.pointerType === 'mouse' && pts.size) ? gesture() : null; canvas.style.cursor = dropping ? 'crosshair' : '';
     if (!drag) moved();
   };
   canvas.addEventListener('pointerup', up);
@@ -172,12 +172,15 @@ export function createMap(canvas, { base, onPick, onSearchArea, onMove }) {
     zoomAt(-e.deltaY * (e.deltaMode ? 0.05 : 0.0022), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
   function click(e) {
-    if (!data) return;
     const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    // "3D view anywhere": the next tap drops the 3D camera at that point instead of picking a spot
+    if (dropping) { setDrop(false); onDrop?.(fromPx(mx, my)); return; }
+    if (!data) return;
     let best = null, bd = 26;
     data.picks.forEach((s, n) => { const p = toPx(s.lat, s.lon), d = Math.hypot(p.x - mx, p.y - my); if (d < bd) { bd = d; best = n; } });
     if (best != null) onPick(best);
   }
+  function setDrop(on) { dropping = on; canvas.style.cursor = on ? 'crosshair' : ''; }
   new ResizeObserver(redraw).observe(canvas);
 
   function fit(a) {
@@ -197,6 +200,7 @@ export function createMap(canvas, { base, onPick, onSearchArea, onMove }) {
     attribution: () => (tilesOk ? 'Imagery © Vexcel Imaging' : 'No imagery: golden’s server isn’t reachable'),
     noTiles() { tilesOk = false; redraw(); },
     draw: redraw,
+    drop: setDrop, dropping: () => dropping,
   };
 }
 

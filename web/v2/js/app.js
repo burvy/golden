@@ -227,10 +227,17 @@ function flash() { const f = $('#funnel'); f.classList.remove('flash'); void f.o
 // ---------------------------------------------------------------- map, layers and legend
 const map = createMap($('#map'), {
   base: BASE,
-  onPick: n => { S.sel = n; renderSpot(); drawMap(); },
+  onPick: n => { dropped = null; S.sel = n; renderSpot(); drawMap(); },
+  // "3D view anywhere": a point the user dropped on the map, not one of the ranked spots
+  onDrop: pt => { armDrop(false); dropped = { lat: pt.lat, lon: pt.lon }; setTab('3d'); },
   onMove: prop => { $('#searcharea').hidden = !prop || !S.result; },
 });
 $('#searcharea').onclick = () => { const a = map.proposal(); if (a) searchAgain(editedBrief({ area: { lat: a.lat, lon: a.lon, radius_m: a.radius_m } }), `Searching ${a.radius_m} m around the middle of the map…`, { keepEdits: null }); };
+function armDrop(on) {
+  map.drop(on); $('#zdrop').setAttribute('aria-pressed', String(on));
+  toast(on ? 'Click anywhere on the map to stand there in the 3D view.' : '');
+}
+$('#zdrop').onclick = () => armDrop(!map.dropping());
 $('#zin').onclick = () => map.zoom(0.5); $('#zout').onclick = () => map.zoom(-0.5); $('#zfit').onclick = () => map.fitArea();
 function renderLayers() {
   const live = S.goals.map((g, k) => k).filter(k => !S.goals[k].removed);
@@ -277,19 +284,22 @@ function renderSpot() {
           <li><span class="mute">${esc(r.brief.date)}, ${r.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}. <a href="https://www.google.com/maps/dir/?api=1&amp;destination=${+p.lat},${+p.lon}" target="_blank" rel="noopener">Directions</a></span></li></ul>
       </div>
     </div>`;
-  el.querySelectorAll('.sp-rank button').forEach((b, n) => (b.onclick = () => { S.sel = n; renderSpot(); drawMap(); }));
+  el.querySelectorAll('.sp-rank button').forEach((b, n) => (b.onclick = () => { dropped = null; S.sel = n; renderSpot(); drawMap(); }));
   setBusy(S.searching ? $('#busy').textContent : null);
   showView();
 }
-let viewTab = 'map', shown = '';
-function setTab(t) { viewTab = t; showView(); }
+let viewTab = 'map', shown = '', dropped = null;
+function setTab(t) { if (t === 'map') dropped = null; viewTab = t; showView(); }
 document.querySelectorAll('.vtabs button').forEach(b => (b.onclick = () => setTab(b.dataset.t)));
-// Map, or the photo / 3D view of the selected spot, in the same box. Reloads only when the tab or the spot changes.
+// What the photo / 3D tabs show: a point dropped on the map, else the selected spot.
+const target = () => dropped ?? S.picks[S.sel];
+// Map, or the photo / 3D view of the selected spot (or dropped point), in the same box. Reloads only when the tab or the place changes.
 function showView() {
-  const p = S.picks[S.sel];
+  const p = target();
   if (!p && viewTab !== 'map') viewTab = 'map';
   document.querySelectorAll('.vtabs button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.t === viewTab)); if (b.dataset.t !== 'map') b.disabled = !p; });
-  $('#vspot').textContent = p && viewTab !== 'map' ? `Spot ${S.sel + 1}, looking toward the ${S.result.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}${viewTab === '3d' ? '. Click it, then WASD to fly, Q/E down/up, Shift faster, R back' : ''}` : '';
+  const where = p === dropped ? 'Your dropped point' : `Spot ${S.sel + 1}`;
+  $('#vspot').textContent = p && viewTab !== 'map' ? `${where}, looking toward the ${S.result?.brief.event === 'sunrise' ? 'sunrise' : 'sunset'}${viewTab === '3d' ? '. Click it, then WASD to fly, Q/E down/up, Shift faster, R back' : ''}` : '';
   const onMap = viewTab === 'map';
   $('.mapwrap').hidden = !onMap; $('#view').hidden = onMap;
   const key = onMap ? 'map' : `${viewTab} ${p.lat} ${p.lon}`;
@@ -300,28 +310,31 @@ function showView() {
 }
 let view3d = null;
 async function media(p) {
-  const mediaTab = viewTab;
-  const v = $('#view'), az = p.spot?.sun?.hidden_az_deg ?? (S.result.brief.event === 'sunrise' ? 115 : 246);
+  const mediaTab = viewTab, sunrise = S.result?.brief.event === 'sunrise';
+  // a dropped point has no skyline of its own: look the way the selected spot's sun sets, else low in the west/east
+  const ref = p.spot ?? S.picks[S.sel]?.spot;
+  const v = $('#view'), az = ref?.sun?.hidden_az_deg ?? (sunrise ? 115 : 246), el = ref?.sun?.hidden_elev_deg ?? 3;
+  const label = p === dropped ? 'your dropped point' : `spot ${S.sel + 1}`;
   if (view3d) { try { view3d.dispose?.(); } catch (_) {} view3d = null; }
   if (mediaTab === 'photo') {
     v.innerHTML = '<div class="ph">Loading the aerial photo…</div>';
     try {
       const r = await fetch(`${BASE}/api/photo?lat=${p.lat}&lon=${p.lon}&look_az_deg=${Math.round(az)}&radius_m=150&max_px=1024`);
       if (!r.ok) throw 0; const m = await r.json();
-      if (S.picks[S.sel] !== p || viewTab !== 'photo') return;
-      v.innerHTML = `<img alt="Aerial photo looking toward the ${S.result.brief.event} from spot ${S.sel + 1}" src="${esc(BASE + m.image_url)}">`;
-    } catch (_) { if (S.picks[S.sel] === p) v.innerHTML = '<div class="ph">No aerial photo here: golden’s server isn’t reachable, or has none cached for this spot.</div>'; }
+      if (target() !== p || viewTab !== 'photo') return;
+      v.innerHTML = `<img alt="Aerial photo looking toward the ${sunrise ? 'sunrise' : 'sunset'} from ${label}" src="${esc(BASE + m.image_url)}">`;
+    } catch (_) { if (target() === p) v.innerHTML = '<div class="ph">No aerial photo here: golden’s server isn’t reachable, or has none cached for this place.</div>'; }
   } else {
     v.innerHTML = '<div class="ph">Loading the 3D view…</div>';
     try {
       const at = await fetch(`${BASE}/api/mesh/at?lat=${p.lat}&lon=${p.lon}`).then(r => (r.ok ? r.json() : Promise.reject()));
       const m = await import('../../js/meshview.js?v=fly');
-      if (S.picks[S.sel] !== p || viewTab !== '3d') return;
+      if (target() !== p || viewTab !== '3d') return;
       v.innerHTML = '';
       view3d = await m.create({ host: v, base: BASE, lat: p.lat, lon: p.lon, yaw: az, tilesetUrl: at.tileset_url, attribution: at.attribution, onStatus: () => {} });
-      // the sky shader needs a sun position (black without one): the sun where it meets this spot's skyline, else low in the west/east
-      view3d.setSun?.(az, p.spot?.sun?.hidden_elev_deg ?? 3);
-    } catch (_) { if (S.picks[S.sel] === p) v.innerHTML = '<div class="ph">No 3D view here: golden’s server isn’t reachable, or has no mesh for this spot.</div>'; }
+      // the sky shader needs a sun position (black without one): the sun where it meets the spot's skyline, else low in the west/east
+      view3d.setSun?.(az, el);
+    } catch (_) { if (target() === p) v.innerHTML = '<div class="ph">No 3D view here: golden’s server isn’t reachable, or Vexcel has no 3D mesh for this place.</div>'; }
   }
 }
 
