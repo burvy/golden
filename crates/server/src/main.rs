@@ -14,7 +14,7 @@
 //!   GET  /proto/map              map prototype
 //!
 //! Heights come from Vexcel where our key covers (LA, Houston, Princeton...), else USGS LiDAR (`heights.rs`).
-//! Binds 127.0.0.1:8787; set `GOLDEN_ADDR=0.0.0.0:8787` to try it from a phone on the same Wi-Fi.
+//! Binds 127.0.0.1:8787 (`GOLDEN_BIND`, or the older name `GOLDEN_ADDR`, changes it); set `GOLDEN_BIND=0.0.0.0:8787` to try it from a phone on the same Wi-Fi.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ const DEFAULT_ADDR: &str = "127.0.0.1:8787";
 
 #[tokio::main]
 async fn main() {
-    let addr = std::env::var("GOLDEN_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
+    let addr = std::env::var("GOLDEN_BIND").or_else(|_| std::env::var("GOLDEN_ADDR")).unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("could not bind {addr} (already running?): {e}"));

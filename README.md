@@ -24,7 +24,7 @@ Without the scripts (any OS), from the repo root:
 ```sh
 cargo run --release -p server   # serves web/ at / and the API under /api
 ```
-Open http://localhost:8787 (phone on the same Wi-Fi: set `GOLDEN_ADDR=0.0.0.0:8787` and open the laptop's IP).
+Open http://localhost:8787 (phone on the same Wi-Fi: set `GOLDEN_BIND=0.0.0.0:8787` and open the laptop's IP).
 Type a brief such as "sunset between two buildings from a rooftop in Princeton tonight" and press Find spots. The first
 search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env` (or point `VEXCEL_ENV_FILE` / `ANTHROPIC_ENV_FILE` at a file holding just the key); the server prints at startup whether it found each one. With no Claude key
 the agent runs as an offline mock, and opened as a file (no server) the page shows sample data.
@@ -67,8 +67,7 @@ behind the guards in `crates/server/src/guard.rs`:
 $env:GOLDEN_OFFLINE = "1"                          # never download: Vexcel, USGS LiDAR, Google, detection
 $env:VEXCEL_CACHE_DIR = "D:\golden-cache"       # the pre-fetched demo areas (Downtown LA, Princeton)
 $env:GOLDEN_CLAUDE_DAILY_MAX = "300"               # Claude calls a day for the whole site (or GOLDEN_CLAUDE=off)
-$env:GOLDEN_TRUST_PROXY = "1"                      # only if a reverse proxy / tunnel sits in front
-$env:GOLDEN_ADDR = "127.0.0.1:8787"                # the proxy connects here
+$env:GOLDEN_BIND = "127.0.0.1:8787"                # loopback only (the default); nginx proxies /golden/api/ here
 cargo run --release -p server
 ```
 
@@ -81,9 +80,10 @@ cargo run --release -p server
 | `GOLDEN_RATE_HEAVY_PER_MIN` | Per IP: search, horizon, scene, photo (burst 2x) | 30 |
 | `GOLDEN_RATE_PER_MIN` | Per IP: every other `/api/*` call (tiles, mesh, `.bin`/`.jpg` and the web app are not limited) | 300 |
 | `GOLDEN_HEAVY_CONCURRENCY` | AI + heavy requests running at once; others queue up to 30 s, then 503 | 4 |
-| `GOLDEN_TRUST_PROXY` | `1`: client IP from `CF-Connecting-IP` / `X-Real-IP` / last `X-Forwarded-For`. Without it, behind a proxy everyone shares one bucket. Don't set it when clients connect directly (they could fake the header) | off |
-| `GOLDEN_CORS_ORIGINS` | Comma list of origins that may call the API from their pages (`off` for none) | `https://burvy.dev,https://www.burvy.dev` |
+| `GOLDEN_TRUSTED_PROXIES` | Client IP for the limits: when the TCP peer is loopback (nginx on the same machine) or one of these IPs (comma list), it's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop; otherwise the peer address, so direct clients can't fake it | loopback only |
+| `GOLDEN_CORS_ORIGINS` | Comma list of origins that may call the API from pages on another origin. Not needed on burvy.dev (page and API share the origin) | none |
 | `GOLDEN_WARM` | `0`: don't load the preset demo grids at startup (normally ~10 s in the background, so the first search is fast) | on |
+| `GOLDEN_BIND` | Listen address (`GOLDEN_ADDR` still works) | `127.0.0.1:8787` |
 
 Over the limit: 429 with `Retry-After`. The startup log prints one `guard:` line with the settings in force.
 

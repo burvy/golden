@@ -14,10 +14,11 @@
 //!   - every other `/api/*` call: `GOLDEN_RATE_PER_MIN` (default 300, burst 2x).
 //!   Map tiles, mesh, scene binaries, photo JPEGs and the web app are not limited (cache reads, many per view).
 //! - `GOLDEN_HEAVY_CONCURRENCY` (default 4): AI and heavy requests running at once; the rest wait up to 30 s, then 503.
-//! - `GOLDEN_TRUST_PROXY=1`: behind a reverse proxy, take the client IP from `CF-Connecting-IP`, `X-Real-IP` or the
-//!   last `X-Forwarded-For` entry instead of the socket (otherwise every visitor shares the proxy's bucket).
-//! - `GOLDEN_CORS_ORIGINS` (default `https://burvy.dev,https://www.burvy.dev`; `off` for none): origins allowed to
-//!   call the API from a browser page served elsewhere.
+//! - Client IP: when the TCP peer is loopback (nginx on the same machine) or listed in `GOLDEN_TRUSTED_PROXIES`
+//!   (comma list of IPs), it's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop; otherwise the peer address,
+//!   so a visitor connecting directly can't pick their own bucket with a header.
+//! - `GOLDEN_CORS_ORIGINS` (default none: burvy.dev serves the page and the API on one origin): comma list of
+//!   origins allowed to call the API from a page served elsewhere.
 //! - `GOLDEN_WARM=0`: don't load the preset demo grids at startup.
 
 use std::collections::HashMap;
@@ -41,14 +42,14 @@ pub const MAX_SCENES: usize = 32;
 const MAX_BUCKETS: usize = 10_000;
 /// How long an AI or heavy request waits for a free slot before giving up.
 const QUEUE_WAIT: Duration = Duration::from_secs(30);
-const DEFAULT_CORS: &str = "https://burvy.dev,https://www.burvy.dev";
 
 /// The guard settings and their live state (buckets, the Claude budget, the heavy-request slots).
 pub struct Guard {
     pub offline: bool,
     pub claude_on: bool,
     pub claude_daily_max: u32,
-    pub trust_proxy: bool,
+    /// Proxies (besides loopback) whose forwarded-for headers are believed.
+    pub trusted: Vec<IpAddr>,
     pub cors: Vec<String>,
     pub warm: bool,
     ai: Limiter,
@@ -75,12 +76,12 @@ impl Guard {
     pub fn from_vars(var: impl Fn(&str) -> Option<String>) -> Guard {
         let num = |k: &str, d: f64| var(k).and_then(|v| v.trim().parse::<f64>().ok()).filter(|n| *n >= 0.0).unwrap_or(d);
         let off = |k: &str| matches!(var(k).map(|s| s.trim().to_ascii_lowercase()).as_deref(), Some("0" | "false" | "no" | "off"));
-        let cors = var("GOLDEN_CORS_ORIGINS").unwrap_or_else(|| DEFAULT_CORS.into());
+        let cors = var("GOLDEN_CORS_ORIGINS").unwrap_or_default();
         Guard {
             offline: truthy(var("GOLDEN_OFFLINE").as_deref()),
             claude_on: !off("GOLDEN_CLAUDE"),
             claude_daily_max: num("GOLDEN_CLAUDE_DAILY_MAX", 300.0) as u32,
-            trust_proxy: truthy(var("GOLDEN_TRUST_PROXY").as_deref()),
+            trusted: var("GOLDEN_TRUSTED_PROXIES").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect(),
             cors: origins(&cors),
             warm: !off("GOLDEN_WARM"),
             ai: Limiter::per_min(num("GOLDEN_RATE_AI_PER_MIN", 6.0)),
@@ -102,7 +103,7 @@ impl Guard {
             self.heavy.per_min,
             self.light.per_min,
             if self.cors.is_empty() { "off".into() } else { self.cors.join(" ") },
-            if self.trust_proxy { "; client IP from proxy headers" } else { "" },
+            if self.trusted.is_empty() { String::new() } else { format!("; trusted proxies {:?}", self.trusted) },
         )
     }
 
@@ -250,14 +251,14 @@ pub fn class(path: &str) -> Class {
     }
 }
 
-/// Pure: the client's IP. Behind a trusted proxy, from its headers (Cloudflare's `CF-Connecting-IP`, then
-/// `X-Real-IP`, then the last `X-Forwarded-For` hop, which is the one our proxy added); else the socket.
-pub fn client_ip(headers: &HeaderMap, peer: Option<IpAddr>, trust_proxy: bool) -> Option<IpAddr> {
-    if trust_proxy {
+/// Pure: the client's IP. When the peer is a proxy we trust (loopback, or in `trusted`), from its headers:
+/// Cloudflare's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop. Otherwise, or with no usable header,
+/// the peer itself.
+pub fn client_ip(headers: &HeaderMap, peer: Option<IpAddr>, trusted: &[IpAddr]) -> Option<IpAddr> {
+    if peer.is_some_and(|p| p.is_loopback() || trusted.contains(&p)) {
         let h = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
         let from_headers = h("cf-connecting-ip")
-            .or_else(|| h("x-real-ip"))
-            .or_else(|| h("x-forwarded-for").and_then(|v| v.rsplit(',').next()))
+            .or_else(|| h("x-forwarded-for").and_then(|v| v.split(',').next()))
             .and_then(|v| v.trim().parse().ok());
         if from_headers.is_some() {
             return from_headers;
@@ -274,7 +275,7 @@ pub async fn limit(State(g): State<&'static Guard>, req: Request, next: Next) ->
     }
     let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
     // No address at all only happens in tests (no socket); everyone then shares one bucket.
-    let ip = client_ip(req.headers(), peer, g.trust_proxy).unwrap_or(IpAddr::from([0, 0, 0, 0]));
+    let ip = client_ip(req.headers(), peer, &g.trusted).unwrap_or(IpAddr::from([0, 0, 0, 0]));
     let limiter = match class {
         Class::Ai => &g.ai,
         Class::Heavy => &g.heavy,
@@ -373,9 +374,10 @@ mod tests {
     #[test]
     fn defaults_are_online_with_claude_capped() {
         let g = guard(&[]);
-        assert!(!g.offline && g.claude_on && g.warm && !g.trust_proxy);
+        assert!(!g.offline && g.claude_on && g.warm && g.trusted.is_empty());
         assert_eq!(g.claude_daily_max, 300);
-        assert_eq!(g.cors, ["https://burvy.dev", "https://www.burvy.dev"]);
+        assert!(g.cors.is_empty(), "same origin behind nginx: no CORS by default");
+        assert!(cors(&g).is_none());
     }
 
     #[test]
@@ -446,17 +448,23 @@ mod tests {
     }
 
     #[test]
-    fn client_ip_trusts_proxy_headers_only_when_told() {
+    fn client_ip_believes_headers_only_from_a_trusted_peer() {
+        let ip = |s: &str| -> IpAddr { s.parse().unwrap() };
         let mut h = HeaderMap::new();
         h.insert("x-forwarded-for", "9.9.9.9, 10.0.0.2".parse().unwrap());
-        let peer: IpAddr = "127.0.0.1".parse().unwrap();
-        assert_eq!(client_ip(&h, Some(peer), false), Some(peer));
-        assert_eq!(client_ip(&h, Some(peer), true), Some("10.0.0.2".parse().unwrap()), "the hop our proxy added");
+        // nginx on loopback: the first hop is the visitor
+        assert_eq!(client_ip(&h, Some(ip("127.0.0.1")), &[]), Some(ip("9.9.9.9")));
+        assert_eq!(client_ip(&h, Some(ip("::1")), &[]), Some(ip("9.9.9.9")));
+        // a direct visitor can't choose their bucket with a header
+        assert_eq!(client_ip(&h, Some(ip("5.5.5.5")), &[]), Some(ip("5.5.5.5")));
+        // unless that peer is a listed proxy
+        assert_eq!(client_ip(&h, Some(ip("10.1.1.1")), &[ip("10.1.1.1")]), Some(ip("9.9.9.9")));
         h.insert("cf-connecting-ip", "8.8.4.4".parse().unwrap());
-        assert_eq!(client_ip(&h, Some(peer), true), Some("8.8.4.4".parse().unwrap()));
+        assert_eq!(client_ip(&h, Some(ip("127.0.0.1")), &[]), Some(ip("8.8.4.4")), "Cloudflare's header first");
         let mut junk = HeaderMap::new();
-        junk.insert("x-real-ip", "not an ip".parse().unwrap());
-        assert_eq!(client_ip(&junk, Some(peer), true), Some(peer));
+        junk.insert("x-forwarded-for", "not an ip".parse().unwrap());
+        assert_eq!(client_ip(&junk, Some(ip("127.0.0.1")), &[]), Some(ip("127.0.0.1")));
+        assert_eq!(client_ip(&HeaderMap::new(), None, &[]), None);
     }
 
     /// A tiny app behind the guard, with `pairs` as its environment.
@@ -467,7 +475,10 @@ mod tests {
             .route("/api/search", post(|| async { "ok" }))
             .route("/api/tiles/vexcel/1/2/3", get(|| async { "tile" }))
             .layer(axum::middleware::from_fn_with_state(g, limit));
-        r.layer(cors(g).unwrap())
+        match cors(g) {
+            Some(c) => r.layer(c),
+            None => r,
+        }
     }
 
     async fn status_of(app: &axum::Router, req: axum::http::Request<axum::body::Body>) -> (StatusCode, HeaderMap) {
@@ -497,7 +508,7 @@ mod tests {
     async fn cors_allows_only_the_listed_origins() {
         use axum::body::Body;
         use axum::http::Request;
-        let app = guarded(&[]);
+        let app = guarded(&[("GOLDEN_CORS_ORIGINS", "https://burvy.dev")]);
         let preflight = |origin: &str| {
             Request::builder()
                 .method(Method::OPTIONS)
