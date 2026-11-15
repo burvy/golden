@@ -190,3 +190,46 @@
   5. Princeton stays on realview.js unless Vexcel releases a mesh (ask mentors for the collection name) or a Google
      key with Map Tiles API is added (3d-tiles-renderer has GoogleCloudAuthPlugin).
   6. Update docs/contracts.md with /api/mesh/* (not done: contract change goes in its own small PR).
+
+## 11/14/26, 11:19PM: cost-function library, object sources and agent tools (branch `server/cost-library`)
+
+Judges asked for an agent that designs its own cost functions and keeps a library of them. Decision: the agent
+writes core's JSON expressions (docs/metrics.md v2), not words and not code. Words can't be evaluated without a
+model call per point; code can't be made safe in time. Expressions are checked before use, can't loop or crash,
+run in Rust inside the funnel, and only the ones a brief names are evaluated, so a big library can't slow or
+confuse a search.
+
+Built on core/metrics (task 051, merged into this branch until it lands on main):
+- `crates/vexcel/src/detect.rs`: `POST /v2/elements/detect` over fixed-lattice 300 m boxes touching the area,
+  at most 9 per call, nearest first. Each answer is split by label and cached as its own file, so "tree" after
+  "tree, car" is free and cached areas work without a key. POST shares the GET backoff on 429/5xx.
+- `crates/server/src/objects.rs`: `find_objects(area, kinds, key)` merges CoStar buildings (top = ground + CoStar
+  height, else the DSM) and Vexcel detections (top = highest surface in the box) into `contracts::Object`, keeps
+  the same thing once (CoStar first, then confidence), at most 60 per kind.
+- `agent/library.rs`: seeds from core (read-only) + saves in `cache/library/<name>.json`. Names `[a-z0-9_]`, no
+  shadowing a seed or replacing a save, every file re-checked on load and skipped (logged) if bad.
+- `agent/trial.rs`: test run on ~50 even points through core's own pieces; a test checks it agrees with
+  `search_with`. Refuses a save only if the must drops everything, or nothing is dropped and scores are flat.
+  First version also refused "gate drops 75%, kept points all 1.0", which is a good function: fixed, with a caution.
+- `agent/tools.rs` + `claude.rs::tool_turn`: the search step as a Claude tool loop (list, define + trial, save,
+  find_objects, search, investigate with oblique photos, finish with the agent's order). Strict tools,
+  `tool_choice` auto, medium effort, thinking blocks passed back unchanged, tools + system prompt cached.
+  Caps: 10 turns, 16 tool calls, 4 defines, 120 s. Refusal / cut-off / HTTP error / never searched / no spots:
+  the old fixed search runs and the steps say why. Every tool call is in stderr and the sheet's steps.
+- `api::run_search` now searches with seeds + saved functions, so `/api/search` and the chat can `use` them.
+- Hook in `agent/mod.rs` is one line (search_with_replan -> tools::search_step) to stay clear of agent/chat (054).
+
+Tests (offline, no keys): fake Claude scripted per turn, synthetic city, the probe's detection sample. A wrong
+define comes back with core's error verbatim, the right one with its distribution, it's saved, searched, the
+agent re-ranks after investigate, and a later plain /api/search reuses it. Plus: degenerate save refused, refusal
+and runaway loops stop, a loop that never searches falls back, bad tool input is an error result.
+`cargo test --workspace` green.
+
+Not done / for others:
+- Live run not done: no ANTHROPIC_API_KEY on this machine (server says "Claude: no key"). Needs the key in
+  env/.env (`ANTHROPIC_API_KEY=...`) or a bare-key file in ANTHROPIC_ENV_FILE, then one LA hero brief.
+- Object features (dist, bearing, visible) aren't in core yet (task 052), so functions can't use objects; the
+  prompt says so and find_objects only informs the plan for now.
+- "fountain" isn't in contracts::OBJECT_KINDS: adding it is a one-line contracts PR (with a detection check).
+- trial.rs should move into core as `search::sample` (pure); raised for burvy.
+- Detection may be billed separately by Vexcel (probe caveat); boxes are cached and capped, untested above 150 m.

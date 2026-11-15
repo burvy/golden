@@ -27,6 +27,7 @@ mod api;
 mod guard;
 mod heights;
 mod mesh;
+mod objects;
 mod scene;
 mod secrets;
 mod state;

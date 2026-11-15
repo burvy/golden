@@ -61,7 +61,7 @@ pub fn parse_date(s: &str) -> Result<NaiveDate, ApiErr> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| ApiErr::bad(format!("bad date {s:?}, expected YYYY-MM-DD")))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, ApiErr> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, ApiErr> {
     tokio::task::spawn_blocking(f).await.map_err(|e| ApiErr::upstream(format!("worker failed: {e}")))
 }
 
@@ -144,8 +144,16 @@ async fn post_search(State(st): State<Arc<AppState>>, body: Result<Json<Brief>, 
     Ok(Json(run_search(&st, brief).await?).into_response())
 }
 
-/// Search used by the endpoint and by the agent.
+/// Search used by the endpoint and by the agent: the whole cost-function library (the seeds plus every
+/// function the agent saved), and the objects of the kinds the goals name (none for a sun-only brief).
 pub async fn run_search(st: &AppState, brief: Brief) -> Result<SearchResult, ApiErr> {
+    let library = crate::agent::library::Library::at(&st.cache_root).all();
+    let objects = crate::objects::for_goals(st, &brief.area, &brief.goals, &library).await;
+    run_search_with(st, brief, library, objects).await
+}
+
+/// `run_search` with the cost functions the brief's `use` goals may name and the objects they may mean.
+pub async fn run_search_with(st: &AppState, brief: Brief, library: Vec<contracts::CostFn>, objects: Vec<contracts::Object>) -> Result<SearchResult, ApiErr> {
     let t0 = Instant::now();
     check_lat_lon(brief.area.lat, brief.area.lon)?;
     in_range("area.radius_m", brief.area.radius_m, 50.0, contracts::search::MAX_BRIEF_RADIUS_M)?;
@@ -156,7 +164,10 @@ pub async fn run_search(st: &AppState, brief: Brief) -> Result<SearchResult, Api
     let zone = tz::parse(&brief.tz).map_err(ApiErr::bad)?;
     let grid = st.grids.around(brief.area.lat, brief.area.lon, skyline_need_m(brief.area.radius_m)).await?;
     let b = brief.clone();
-    let out = blocking(move || golden_core::search::search(&grid, &b, tz::offset_s(zone, date)))
+    let out = blocking(move || {
+        let inputs = golden_core::search::Inputs { library: &library, objects: &objects };
+        golden_core::search::search_with(&grid, &b, &inputs, tz::offset_s(zone, date))
+    })
         .await?
         .map_err(|e| ApiErr::unprocessable(e.to_string()))?;
     let mut spots = out.spots;

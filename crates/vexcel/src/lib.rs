@@ -18,6 +18,7 @@
 pub mod auth;
 pub mod cache;
 pub mod client;
+pub mod detect;
 pub mod mesh;
 pub mod geotiff;
 pub mod grid;

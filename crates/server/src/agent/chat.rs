@@ -140,10 +140,12 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
 
     let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
     brief.goals = goals_for(&brief, &turn.rels);
-    // What the search can score here: seed goals whose objects are known. The server has no object source yet
-    // (task 053), so object goals stay "not checked yet" until it does, then switch on by themselves.
-    let lib = golden_core::library::seeds();
-    let inputs = golden_core::search::Inputs { library: &lib, objects: &[] };
+    // What the search can score here: library goals whose objects are found in the area (CoStar buildings,
+    // Vexcel detections, task 053). The rest stay "not checked yet". The search (run_search) finds the same
+    // objects again, from memory and the detection cache.
+    let lib = super::library::Library::at(&st.cache_root).all();
+    let objects = crate::objects::for_goals(st, &brief.area, &brief.goals, &lib).await;
+    let inputs = golden_core::search::Inputs { library: &lib, objects: &objects };
     let unchecked: Vec<Rel> = turn.rels.iter().zip(&brief.goals[1..]).filter(|(_, g)| !checkable(g, &inputs, &brief.area)).map(|(r, _)| r.clone()).collect();
     let mut known = turn.known;
     if req.area.is_some() {
@@ -167,7 +169,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     log.add("chat", format!("Understood after {qs}: {} (by {by})", words.join(", ")));
     let note = cant_check_note(&unchecked, brief.event);
     if let Some(n) = &note {
-        log.add("goals", format!("{n} Spots are ranked on the sun only; no objects are known here yet."));
+        log.add("goals", format!("{n} Those goals are left out of the search: no such objects found in the area."));
     }
     // The search gets only the goals it can score (an unknown name is an error since 051). The sheet writer
     // reads brief.text: tell it what the search ignored, then put the user's words back.
@@ -930,7 +932,49 @@ mod tests {
         assert_eq!(search.layers.iter().map(|l| l.goal.as_str()).collect::<Vec<_>>(), ["sun_clear"]);
         assert!(sheet.spots[0].spot.scores.iter().all(|r| r.goal == "sun_clear"));
         assert_eq!(sheet.caveats[0], r.note.unwrap());
-        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("no objects are known here")), "{:?}", sheet.steps);
+        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("no such objects found in the area")), "{:?}", sheet.steps);
+    }
+
+    #[tokio::test]
+    async fn object_goals_switch_on_when_the_objects_are_found() {
+        // two CoStar towers on the city's blocks, and one tree detected (cached, no key) west of the centre
+        let at = |east: f64, north: f64| {
+            let lat = crate::testkit::LAT + north / 111_320.0;
+            (lat, crate::testkit::LON + east / (111_320.0 * crate::testkit::LAT.to_radians().cos()))
+        };
+        let dir = crate::testkit::temp_dir("kit");
+        std::fs::create_dir_all(dir.join("data")).unwrap();
+        let rows: Vec<String> = [(7, at(120.0, 120.0)), (8, at(180.0, 120.0))]
+            .iter()
+            .map(|(id, (la, lo))| format!("{{\"id\":{id},\"primaryAddress\":{{\"latitude\":{la},\"longitude\":{lo}}},\"buildingHeightInFeet\":150}}"))
+            .collect();
+        std::fs::write(dir.join("data/commercial-property.jsonl"), rows.join("\n") + "\n").unwrap();
+        let kit: &'static costar::Kit = Box::leak(Box::new(costar::Kit::load(&dir).unwrap()));
+        let st = AppState { kit: Some(kit), ..crate::testkit::state(crate::testkit::city()) };
+        let ((s, w), (n, e)) = (at(-102.0, 48.0), at(-98.0, 52.0));
+        let tree = json!({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"label": "tree", "detections": [{"confidence": 0.9}]},
+            "geometry": {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}}]});
+        let (bxs, _) = vexcel::detect::boxes(crate::testkit::LAT, crate::testkit::LON, 300.0);
+        for &b in &bxs {
+            let p = vexcel::detect::cache_path(&st.cache_root, b, "tree");
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, tree.to_string()).unwrap();
+        }
+
+        let mut q = city_req(&[("u", "tree in front of a tower at sunset")]);
+        q.go = true;
+        let r = chat_with(&st, q, now(), None).await.unwrap();
+        let brief = r.brief.unwrap();
+        assert_eq!(brief.goals.iter().map(Goal::name).collect::<Vec<_>>(), ["sun_clear", "in_front"]);
+        assert_eq!(r.note, None, "nothing left unchecked");
+        assert!(r.understood.contains(&"tree in front of a tower".to_string()), "{:?}", r.understood);
+        let sheet = r.sheet.unwrap();
+        assert_eq!(sheet.brief.goals, brief.goals, "the search got the object goal too");
+        let search = sheet.search.as_ref().unwrap();
+        assert_eq!(search.layers.iter().map(|l| l.goal.as_str()).collect::<Vec<_>>(), ["sun_clear", "in_front"]);
+        assert!(search.objects.iter().any(|o| o.kind == "tree") && search.objects.iter().any(|o| o.id.starts_with("costar:")), "{:?}", search.objects);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&st.cache_root);
     }
 
     #[tokio::test]

@@ -13,8 +13,11 @@
 
 pub mod chat;
 pub mod claude;
+pub mod library;
 pub mod read;
 pub mod times;
+pub mod tools;
+pub mod trial;
 
 use std::sync::Arc;
 
@@ -87,7 +90,10 @@ async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claud
     let lap = |name, split: &mut Vec<(&str, u128)>| split.push((name, clock.elapsed().as_millis()));
 
     // 2. search, re-planning if nothing fits
-    let (result, notes) = search_with_replan(st, brief, &place.name, &mut log).await?;
+    // The cost-function planner (task 053) is opt-in until it has been judged against the fixed search on the
+    // demo briefs: off, the search runs the brief's goals as read, exactly as before.
+    let planner = llm.filter(|_| tools::planner_on());
+    let (result, notes) = tools::search_step(st, brief, &place.name, planner, &mut log).await?;
     lap("search", &mut split);
     let brief = result.brief.clone();
     let date = api::parse_date(&brief.date)?;
