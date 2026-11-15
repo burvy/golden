@@ -83,7 +83,7 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
     let zone = tz::parse(&brief.tz).map_err(ApiErr::bad)?;
     let picked: Vec<Spot> = result.spots.iter().take(3).cloned().collect();
     let primary = picked.first().ok_or_else(|| ApiErr::unprocessable("no spots found, even after widening the search"))?.clone();
-    let grid = st.grids.around(brief.area.lat, brief.area.lon, brief.area.radius_m + api::SEARCH_SKYLINE_M).await?;
+    let grid = st.grids.around(brief.area.lat, brief.area.lon, golden_core::search::skyline_need_m(brief.area.radius_m)).await?;
     let source = grid.meta.source.clone();
 
     // 3. sun, photos, buildings
