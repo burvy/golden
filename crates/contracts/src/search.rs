@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::goal::{Goal, Rated, DEFAULT_LENS_DEG};
+use crate::goal::{Goal, Object, Rated, DEFAULT_LENS_DEG};
 use crate::horizon::SunBlock;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +54,9 @@ pub struct Area {
     pub lat: f64,
     pub lon: f64,
     pub radius_m: f64,
+    /// For people only, e.g. "Downtown LA, around 5th & Flower". The search ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -95,6 +98,51 @@ pub struct SearchResult {
     pub heat: HeatGrid,
     pub searched: u32,
     pub took_ms: u64,
+    /// One per goal of the brief (the implicit sun goal when it had none), same order: each goal's
+    /// score at every candidate, so the browser can re-weight and toggle musts without a new search.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<GoalLayer>,
+    /// The funnel, in order: how many candidates were left after each stage.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<Stage>,
+    /// Picked spots are at least this far apart, metres (the browser's re-pick uses the same).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spacing_m: Option<f64>,
+    /// The objects the goals measured from (their `ObjRef`s, resolved), so the map can mark them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<Object>,
+}
+
+/// One goal's score at every candidate (docs/contracts.md#goal-layers-and-stages).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalLayer {
+    /// `Goal::name()`.
+    pub goal: String,
+    /// The weight it was searched with: `Goal::weight_or_default()`.
+    pub weight: f64,
+    /// The goal is a must: a candidate scoring 0 on it is dropped.
+    pub must: bool,
+    /// The goal's score, 0..1, at each candidate (one per cell, same grid as `SearchResult.heat`).
+    /// Raw, not normalised. `null` exactly where `SearchResult.heat` is `null`.
+    pub heat: HeatGrid,
+    /// Cells (indexes into `heat.values`) that the cost function's own `must` drops, whatever the
+    /// goal's `must` says. Part of the formula, so only a server search changes it. Usually empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gate: Vec<u32>,
+}
+
+/// One step of the funnel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Stage {
+    /// Plain words, e.g. "Points in the area", "Somewhere to stand", "On a roof".
+    pub label: String,
+    /// Candidates left after this stage.
+    pub n: u32,
+    /// The goal whose gate this stage is (`Goal::name()`); `None` for the fixed stages.
+    #[serde(default)]
+    pub goal: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +164,31 @@ pub struct Spot {
     /// One entry per goal of the brief (the implicit sun goal when it had none), same order.
     #[serde(default)]
     pub scores: Vec<Rated>,
+    /// What the AI made of the spot after looking at it (photos, 3D); `None` if it didn't look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub investigation: Option<Investigation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Investigation {
+    pub verdict: Verdict,
+    /// A few plain sentences: what it saw and what to do about it.
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    /// The photos agree with the numbers.
+    Confirmed,
+    /// Usable, with a catch the note explains.
+    Caution,
+    /// Better (worse) than the numbers said; the AI moved it in `rank`.
+    MovedUp,
+    MovedDown,
+    /// Doesn't work (blocked, no access...); kept so the user sees why it isn't higher.
+    RuledOut,
 }
 
 /// Coarse score map; same grid layout as `DsmGrid` (row 0 north, row-major).

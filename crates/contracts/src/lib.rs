@@ -24,5 +24,5 @@ pub use goal::{CmpOp, CostFn, Expr, Goal, GoalFn, ListOp, ObjArg, ObjRef, Object
 pub use horizon::{HorizonPoint, HorizonProfile, Observer, SunBlock};
 pub use photo::{PhotoKind, PhotoMeta};
 pub use scene::{SceneMeta, SceneRing};
-pub use search::{Area, Brief, Event, Framing, HeatGrid, SearchResult, Spot, Standing};
+pub use search::{Area, Brief, Event, Framing, GoalLayer, HeatGrid, Investigation, SearchResult, Spot, Stage, Standing, Verdict};
 pub use sun::{GoldenHour, SunEvent, SunPath, SunPoint, TimeRange};

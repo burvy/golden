@@ -28,7 +28,7 @@ struct Case {
 fn brief(lat: f64, lon: f64, radius_m: f64, date: &str, event: Event, standing: Standing, framing: Framing) -> Brief {
     Brief {
         text: String::new(),
-        area: Area { lat, lon, radius_m },
+        area: Area { lat, lon, radius_m, name: None },
         date: date.into(),
         tz: contracts::search::DEFAULT_TZ.into(),
         event,

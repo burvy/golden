@@ -205,6 +205,9 @@ pub struct Object {
     pub radius_m: f64,
     /// `"costar"`, `"vexcel"`, `"osm"`, ...
     pub source: String,
+    /// For people, when the source has one, e.g. "Grand Tower" (CoStar's building name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 // ---- expressions ----------------------------------------------------------------------------

@@ -35,6 +35,7 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `Brief` | defined | server | `search::Brief` | `brief.json` (old style), `brief_goals.json` (with goals) |
 | `Goal`, `CostFn`, `Expr`, `ObjRef`, `Object`, `Rated` | defined | core | `goal::*` | `brief_goals.json`, `search_result.json` |
 | `Spot`, `SearchResult` | defined | core | `search::{Spot, SearchResult}` | `search_result.json` |
+| `GoalLayer`, `Stage`, `Investigation` | proposed (057) | core | `search::{GoalLayer, Stage, Investigation, Verdict}` | `search_layers.json` |
 | `SceneMeta` | defined | server | `scene::SceneMeta` | `scene_meta.json` + `scene.bin` |
 | `PhotoMeta` | defined | server | `photo::PhotoMeta` | `photo_meta.json` |
 | `Building` | defined | costar | `building::{Building, BuildingList}` | `buildings.json` |
@@ -280,7 +281,7 @@ What the filmmaker wants. `POST /api/search` body.
 | Field | Default | Meaning |
 |---|---|---|
 | `text` | `""` | The brief as typed. Only for the agent and logs; search uses the fields below. |
-| `area` | required | Where to look: centre and `radius_m` (50–800; bigger is slower). |
+| `area` | required | Where to look: centre and `radius_m` (50–800; bigger is slower). Optional `name`: a display name for people ("Downtown LA, around Grand Tower"); the search ignores it, left out when unknown. |
 | `date` | required | Local day of the shoot. |
 | `tz` | `America/Los_Angeles` | |
 | `event` | `"sunset"` | `"sunset"` or `"sunrise"`. |
@@ -332,6 +333,53 @@ What the filmmaker wants. `POST /api/search` body.
 | `spot.scores` | One `{goal, score, why}` per goal of the brief (the implicit sun goal if it had none), same order. `score` 0–1. Defaults to `[]` when reading older results. `spot.score` stays the overall rank score; `sun` and `why` stay as they were. |
 | `heat` | Coarse score map for the heatmap layer. Same grid layout as `DsmGrid` (row 0 = north, row-major). `values` are 0–1, `null` where nothing was searched. At most 40×40 = 1,600 values. |
 | `searched`, `took_ms` | How many candidate points were scored, and how long it took. |
+| `spot.investigation` | What the AI made of the spot after looking at it (photos, 3D): `{verdict, note}`, `verdict` one of `confirmed`, `caution`, `moved_up`, `moved_down`, `ruled_out`; `note` a few plain sentences. Left out if it didn't look. |
+| `layers` | One per goal, same order as `spot.scores`: each goal's score at every candidate. See [Goal layers and stages](#goal-layers-and-stages). Left out by older servers. |
+| `stages` | The funnel, in order: `{label, n, goal}`. Left out by older servers. |
+| `spacing_m` | Picked spots are at least this far apart (`max(40, 2 × heat.cell_m)` today). |
+| `objects` | The objects the goals measured from (their `ObjRef`s, resolved): `Object`s, see [Goals](#goals-and-cost-functions), so the map can mark the tower and the fountain. Left out when the goals name none. |
+
+### Goal layers and stages
+Proposed for frontend v2 (task 057; core fills them in task 059). The page re-weights goals and switches
+musts on and off **in the browser**, from these numbers, without a second scoring engine: the formulas
+only ever run in core. Editing a formula, adding a goal or "check the new spots" is a new `POST /api/search`.
+Example: `fixtures/search_layers.json` (the mock's downtown, 4 goals, 1,264 candidates, 52 KB).
+
+There is one candidate per heat cell, so a layer is exact, not a summary.
+
+```json
+"layers": [
+  { "goal": "close_to_tower", "weight": 0, "must": true, "heat": { "...": "HeatGrid of raw 0-1 scores" }, "gate": [17, 18, 56] },
+  { "goal": "sun_between", "weight": 1, "must": false, "heat": { "...": "HeatGrid" } }
+],
+"stages": [
+  { "label": "Points in the area", "n": 1264, "goal": null },
+  { "label": "Somewhere to stand", "n": 1213, "goal": null },
+  { "label": "Close enough to Grand Tower", "n": 1179, "goal": "close_to_tower" },
+  { "label": "The fountain in front of the tower", "n": 770, "goal": "in_front" }
+],
+"spacing_m": 40
+```
+
+| Field | Meaning |
+|---|---|
+| `layer.goal` | `Goal::name()`. |
+| `layer.weight`, `layer.must` | As searched (`weight` is `Goal::weight_or_default()`: 0 for a must with no weight). |
+| `layer.heat` | Same grid as `heat`. The goal's score 0–1 at each candidate, **raw** (not normalised), `null` exactly where `heat` is `null`. Core scores every goal at every candidate that has somewhere to stand, even ones a gate drops, so switching a must off is exact. |
+| `layer.gate` | Cells (indexes into `values`) the cost function's own `must` drops, whatever `layer.must` says. It's part of the formula, so the browser can't switch it off. Usually empty, then left out. |
+| `stage.label`, `n` | Plain words, and how many candidates are left after the stage. Fixed stages first (`goal: null`): points in the area circle, then somewhere to stand (= `searched`). Then one stage per goal that gates, cheapest first, in the order core ran them. |
+| `stage.goal` | The goal whose gate it is, or `null`. |
+
+**The browser rule** (core does the same; `rebuild` in `crates/contracts/tests/fixtures.rs` is the reference):
+1. A cell is dropped if it is in any layer's `gate`, or a layer with `must` scores ≤ 0 there.
+2. Ranking goals: the layers with `weight` > 0. If there are none, every layer with weight 1/n.
+3. `raw` = Σ weight × score over the ranking goals, 0 if dropped. `heat` = raw / max raw (0 if max is 0).
+4. Spots: cells with raw > 0, best first (ties to the lower index), each at least `spacing_m` from those
+   already picked (flat distance between cell centres), up to `max_spots`. Cell centres use the `DsmGrid` formula.
+
+With the searched weights this gives back `heat` and the order of `spots` (to 1e-3 and 1e-5°). After an edit,
+spots the server didn't send have no sun times or reasons yet: the page shows their per-goal scores from the
+layers and offers "check the new ones" (`POST /api/search`).
 
 ### Goals and cost functions
 Part of `Brief` (`goals`). The design and the reasons are in `docs/metrics.md` (v2). Rust: `contracts::goal`.
@@ -382,7 +430,7 @@ are in `goal::OBJECT_KINDS` (`building`, `tree`, `car`, `rooftop HVAC unit`, `sw
 
 An **object** (`Object`), as object sources hand them to core:
 `{ "id": "costar:1234567", "kind": "building", "lat": 34.0501, "lon": -118.2533, "base_m": 88.0, "top_m": 310.0, "radius_m": 30.0, "source": "costar" }`.
-Heights are on the same datum as `DsmGrid`.
+Heights are on the same datum as `DsmGrid`. Optional `name` for people when the source has one ("Grand Tower"), left out otherwise.
 
 `Rated` (`Spot.scores[]`): `{ "goal": "sun_between", "score": 0.91, "why": "Sun sets into a gap between two buildings: ..." }`.
 
@@ -580,4 +628,5 @@ Response (`CallSheet`):
 | `access` | Who to ask for each roof spot. `contact` is a CoStar `Contact` (or `null` if CoStar has none). `ask` is a ready-to-send one-line request. |
 | `caveats` | Honest limits that apply to this sheet. |
 | `model` | Which model wrote it (e.g. a Claude model id such as `claude-sonnet-5-5`), or `"mock"`. |
+| `search` | The `SearchResult` the spots came from (heat, layers, stages, up to `max_spots` spots), so the app can draw the map and re-weight goals after a chat. Left out by older servers. |
 | `steps` | What the agent did, in order: `{tool, summary}` with `tool` one of `read`, `plan`, `search`, `photo`, `buildings`, `sun`, `write`. Show it while/after the agent works. May be empty (added 11/14; optional when parsing). |

@@ -268,7 +268,7 @@ async fn settle(
                 None => match geocode(st, w).await {
                     Some((lat, lon)) => {
                         log.add("plan", format!("Google Places put \"{w}\" at {lat:.4}, {lon:.4}"));
-                        Place { name: w.into(), area: Area { lat, lon, radius_m: 300.0 }, tz: tz_guess(lon).into() }
+                        Place { name: w.into(), area: Area { lat, lon, radius_m: 300.0, name: None }, tz: tz_guess(lon).into() }
                     }
                     None => {
                         log.add("plan", format!("Couldn't place \"{w}\" (no Google Places key, or no match); searching Downtown LA"));
@@ -656,7 +656,7 @@ fn assemble(
         }
     );
 
-    CallSheet { title, brief: brief.clone(), summary, timeline, spots, access, caveats, model: "mock".into(), steps: vec![] }
+    CallSheet { title, brief: brief.clone(), summary, timeline, spots, access, caveats, model: "mock".into(), steps: vec![], search: None }
 }
 
 /// "Wed Jun 03 18:10:27 UTC 2026" (Vexcel) or an ISO date -> "3 Jun 2026"; anything else as is.
@@ -821,14 +821,14 @@ mod tests {
     }
 
     fn la_place() -> Place {
-        Place { name: "Downtown LA".into(), area: Area { lat: 34.049, lon: -118.251, radius_m: 400.0 }, tz: "America/Los_Angeles".into() }
+        Place { name: "Downtown LA".into(), area: Area { lat: 34.049, lon: -118.251, radius_m: 400.0, name: None }, tz: "America/Los_Angeles".into() }
     }
 
     /// A brief whose words point one way; the fake model answers the other way, so we can tell who read it.
     fn brief_req() -> AgentRequest {
         AgentRequest {
             text: "sunset from the street, sun between two buildings".into(),
-            area: Some(Area { lat: 34.049, lon: -118.251, radius_m: 300.0 }),
+            area: Some(Area { lat: 34.049, lon: -118.251, radius_m: 300.0, name: None }),
             date: None,
             tz: "America/Los_Angeles".into(),
         }
@@ -901,7 +901,7 @@ mod tests {
     fn agent_req(text: &str) -> AgentRequest {
         AgentRequest {
             text: text.into(),
-            area: Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0 }),
+            area: Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0, name: None }),
             date: Some("2026-06-21".into()),
             tz: "America/Los_Angeles".into(),
         }

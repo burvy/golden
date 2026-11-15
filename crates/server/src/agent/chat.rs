@@ -599,7 +599,7 @@ mod tests {
     fn understood_hides_guesses_while_asking_and_marks_them_after() {
         let b = Brief {
             text: String::new(),
-            area: Area { lat: 40.3487, lon: -74.6593, radius_m: 300.0 },
+            area: Area { lat: 40.3487, lon: -74.6593, radius_m: 300.0, name: None },
             date: "2026-11-15".into(),
             tz: "America/New_York".into(),
             event: Event::Sunset,
@@ -726,7 +726,7 @@ mod tests {
     /// A request on the synthetic city (its area is given, so no place lookup and no download).
     fn city_req(lines: &[(&str, &str)]) -> ChatRequest {
         let mut r = req(lines);
-        r.area = Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0 });
+        r.area = Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0, name: None });
         r.date = Some("2026-06-21".into());
         r
     }
