@@ -446,6 +446,8 @@ the entries hold on bigger areas. The 500 m run printed only; the table above is
 
 ## Promote list (for SEEDS)
 
+All 11 are in core's SEEDS since task 070 (each `about` names its brief). The chat picks `open_horizon` and `sun_wide_gap` itself when asked for those shots.
+
 Ranked for the demo. **Update (round 4): Ray's 053 (object sources) has merged**, so the server now
 passes objects to the search: CoStar buildings in LA, and Vexcel detections where it detects. Object
 entries can bind today wherever the area has a building object. In the lab, Princeton's buildings come

@@ -1,6 +1,6 @@
 {
   "name": "sunset_behind",
-  "about": "Sun sets behind a (silhouette): the sun drops behind something within 5 deg of a. Its must (a at bearing 180-330 deg) drops points before any skyline is traced, so use it as a must",
+  "about": "Sun sets behind a (silhouette): the sun drops behind something within 5 deg of a. Its must (a at bearing 180-330 deg) drops points before any skyline is traced, so use it as a must. For briefs like 'silhouette: the sun drops behind the tower (lab: silhouette)'",
   "params": ["a"],
   "must": { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 255, "width": 75 }, "than": { "num": 0 } },
   "score": { "op": "mul", "of": [
