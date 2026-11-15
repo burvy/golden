@@ -1,0 +1,16 @@
+{
+  "name": "skyline_view",
+  "about": "a reads as part of a skyline, e.g. from a roof across town: 2-20 deg tall, best 4-12, and in view. Its must (2-20 deg tall) drops points before any line-of-sight march",
+  "params": ["a"],
+  "must": { "op": "and", "of": [
+    { "op": "gt", "x": { "f": "size_deg", "obj": "a" }, "than": { "num": 2 } },
+    { "op": "lt", "x": { "f": "size_deg", "obj": "a" }, "than": { "num": 20 } }
+  ] },
+  "score": { "op": "mul", "of": [
+    { "op": "and", "of": [
+      { "op": "ramp", "x": { "f": "size_deg", "obj": "a" }, "lo": 2, "hi": 4 },
+      { "op": "ramp", "x": { "f": "size_deg", "obj": "a" }, "lo": 20, "hi": 12 }
+    ] },
+    { "f": "visible", "obj": "a" }
+  ] }
+}
