@@ -1,6 +1,6 @@
 {
   "name": "tower_lit_at_sunset",
-  "about": "The setting sun lights a (golden light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 345-165 deg, the only side a sunset-lit face can be on) drops points before any skyline is traced, so use it as a must",
+  "about": "The setting sun lights a (golden light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 345-165 deg, the only side a sunset-lit face can be on) drops points before any skyline is traced, so use it as a must. For briefs like 'golden light on the tower (lab: lit-tower)'",
   "params": ["a"],
   "must": { "op": "or", "of": [
     { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 75, "width": 90 }, "than": { "num": 0 } },

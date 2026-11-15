@@ -10,7 +10,8 @@
 //!
 //! The settled brief carries `goals` (docs/contracts.md#goals-and-cost-functions) alongside the old fields:
 //! the sun goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`, what an empty `goals`
-//! means anyway), plus object goals as data: each object word becomes one of `OBJECT_KINDS` when it names one
+//! means anyway) or, when the user asks for one of the lab's sun-only shots (`Shot`, task 070), `open_horizon` /
+//! `sun_wide_gap`, plus object goals as data: each object word becomes one of `OBJECT_KINDS` when it names one
 //! ("tower" -> "building", see `object_kind`), else stays in the user's words ("fountain in front of a tower" ->
 //! `{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "building"}}}`).
 //! The search only gets the goals the seed library can score (sun_* since 051; objects come with 052). For the
@@ -93,6 +94,54 @@ impl Relation {
     }
 }
 
+/// A sun-only shot the seed library has its own entry for (task 070, from the library lab), picked over the
+/// framing's `sun_<framing>` goal when the user asks for it. The framing stays set too, for the old fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Shot {
+    /// "The sun right down to the horizon": `open_horizon`.
+    OpenHorizon,
+    /// "The sun framed by the skyline with room around it" (a 6-20 deg opening): `sun_wide_gap`.
+    WideGap,
+}
+
+impl Shot {
+    fn name(self) -> &'static str {
+        match self {
+            Shot::OpenHorizon => "open_horizon",
+            Shot::WideGap => "sun_wide_gap",
+        }
+    }
+
+    fn framing(self) -> Framing {
+        match self {
+            Shot::OpenHorizon => Framing::Clear,
+            Shot::WideGap => Framing::Between,
+        }
+    }
+
+    fn words(self) -> &'static str {
+        match self {
+            Shot::OpenHorizon => "sun right down to the horizon",
+            Shot::WideGap => "sun in a wide gap in the skyline",
+        }
+    }
+}
+
+/// Pure: the shot the offline reader finds in the text: only plain phrases, so "between two towers" stays
+/// `sun_between`.
+fn read_shot(text: &str) -> Option<Shot> {
+    const HORIZON: [&str; 6] = ["to the horizon", "on the horizon", "touching the horizon", "touches the horizon", "open horizon", "hits the horizon"];
+    const WIDE: [&str; 5] = ["wide gap", "wide opening", "room around", "big gap", "wide space"];
+    if has_any(text, &WIDE) {
+        Some(Shot::WideGap)
+    } else if has_any(text, &HORIZON) {
+        Some(Shot::OpenHorizon)
+    } else {
+        None
+    }
+}
+
 /// An object goal in the user's words: `a` (relation) `b`, e.g. fountain in front of tower.
 #[derive(Debug, Clone, PartialEq)]
 struct Rel {
@@ -107,13 +156,28 @@ impl Rel {
     }
 }
 
-/// What one turn of reading decided: the fields, which of them the user actually said, the object goals, and
-/// the next question.
+/// What one turn of reading decided: the fields, which of them the user actually said, the sun-only shot (if
+/// they asked for one), the object goals, and the next question.
 struct Turn {
     fields: Fields,
     known: Vec<Topic>,
+    shot: Option<Shot>,
     rels: Vec<Rel>,
     ask: Option<ChatAsk>,
+}
+
+impl Turn {
+    /// A shot settles the framing: set it to match, and count it as said (so it isn't asked about).
+    fn with_shot(mut self, shot: Option<Shot>) -> Turn {
+        if let Some(s) = shot {
+            self.fields.framing = s.framing();
+            if !self.known.contains(&Topic::Framing) {
+                self.known.push(Topic::Framing);
+            }
+        }
+        self.shot = shot;
+        self
+    }
 }
 
 async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Option<Claude>) -> Result<ChatReply, ApiErr> {
@@ -139,7 +203,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     let ask = if go { None } else { turn.ask };
 
     let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
-    brief.goals = goals_for(&brief, &turn.rels);
+    brief.goals = goals_for(&brief, turn.shot, &turn.rels);
     // What the search can score here: library goals whose objects are found in the area (CoStar buildings,
     // Vexcel detections, task 053). The rest stay "not checked yet". The search (run_search) finds the same
     // objects again, from memory and the detection cache.
@@ -155,6 +219,10 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         known.push(Topic::Date);
     }
     let mut words = understood_marked(&brief, &place, &known, ask.is_some());
+    if let Some(s) = turn.shot {
+        let framing = framing_words(brief.framing);
+        words.iter_mut().filter(|w| *w == framing).for_each(|w| *w = s.words().to_string());
+    }
     words.extend(turn.rels.iter().map(|r| if unchecked.contains(r) { format!("{} (not checked yet)", r.words()) } else { r.words() }));
     if ask.is_some() {
         return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model, note: None });
@@ -203,11 +271,12 @@ fn user_text(m: &[ChatMessage]) -> String {
         .join(". ")
 }
 
-/// Pure: the goals for a settled brief: the sun goal for its framing, then one goal per object relation, its
-/// objects as `OBJECT_KINDS` where the word names one, else in the user's words (those never bind, so they stay
-/// "not checked yet"). Names follow the seed library (sun_* from 051, objects from 052).
-fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
-    let sun = golden_core::library::sun_goal_name(b.framing);
+/// Pure: the goals for a settled brief: the shot's sun goal if one was asked for, else the one for its framing,
+/// then one goal per object relation, its objects as `OBJECT_KINDS` where the word names one, else in the user's
+/// words (those never bind, so they stay "not checked yet"). Names follow the seed library (sun_* from 051,
+/// objects from 052, open_horizon and sun_wide_gap from 070).
+fn goals_for(b: &Brief, shot: Option<Shot>, rels: &[Rel]) -> Vec<Goal> {
+    let sun = shot.map_or_else(|| golden_core::library::sun_goal_name(b.framing), Shot::name);
     let kind = |k: &str| ObjRef::Kind { kind: object_kind(k).map_or_else(|| k.to_string(), str::to_string), near: None, within_m: None };
     let objects = rels.iter().map(|r| {
         let mut g = Goal::using(r.relation.name());
@@ -430,8 +499,9 @@ fn mock_turn(req: &ChatRequest, text: &str, today: NaiveDate) -> Turn {
     if req.area.is_some() {
         known.push(Topic::Place);
     }
-    let ask = MOCK_ORDER.iter().find(|t| !known.contains(t)).map(|t| question(*t));
-    Turn { fields, known, rels: read_rels(text), ask }
+    let mut turn = Turn { fields, known, shot: None, rels: read_rels(text), ask: None }.with_shot(read_shot(text));
+    turn.ask = MOCK_ORDER.iter().find(|t| !turn.known.contains(t)).map(|t| question(*t));
+    turn
 }
 
 /// Pure: the brief in plain words. Things the user didn't say are left out while we're still asking, and
@@ -466,6 +536,9 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
         "You help a filmmaker find where to stand for a sunset or sunrise shot. Our search needs: place, date, \
          event (sunset or sunrise), standing (roof = rooftop/terrace, ground = street/park, any) and framing \
          (clear = open view of the sun, between = sun in a gap between buildings, behind = sun behind a building, silhouette).\n\
+         Two shots have their own search: open_horizon = they want the sun right down to the horizon (an open view all \
+         the way down); wide_gap = the sun framed by the skyline with room around it (a wide opening, not a narrow gap \
+         between two buildings). Set shot to one of these only if they ask for that shot, else \"none\".\n\
          Today is {} ({}). Places with data: {:?}.\n{area}\
          The conversation so far:\n{}\n\n\
          Return your reading: place = the place named (one of the listed places if it matches, else as written, \"\" if none); \
@@ -497,6 +570,7 @@ fn chat_schema() -> serde_json::Value {
             "event": { "type": "string", "enum": ["sunset", "sunrise"] },
             "standing": { "type": "string", "enum": ["roof", "ground", "any"] },
             "framing": { "type": "string", "enum": ["clear", "between", "behind"] },
+            "shot": { "type": "string", "enum": ["none", "open_horizon", "wide_gap"] },
             "known": { "type": "array", "items": { "type": "string", "enum": ["place", "date", "event", "standing", "framing"] } },
             "ready": { "type": "boolean" },
             "question": { "type": "string" },
@@ -512,7 +586,7 @@ fn chat_schema() -> serde_json::Value {
                 "additionalProperties": false
             } }
         },
-        "required": ["place", "date", "event", "standing", "framing", "known", "ready", "question", "choices", "objects"],
+        "required": ["place", "date", "event", "standing", "framing", "shot", "known", "ready", "question", "choices", "objects"],
         "additionalProperties": false
     })
 }
@@ -527,7 +601,12 @@ fn turn_from_model(text: &str, v: &serde_json::Value) -> Turn {
         choices: v["choices"].as_array().map(|a| a.iter().filter_map(|c| c.as_str()).map(str::trim).filter(|c| !c.is_empty()).take(4).map(str::to_string).collect()).unwrap_or_default(),
     });
     let rels = rels_from_model(&v["objects"]).unwrap_or_else(|| read_rels(text));
-    Turn { fields, known, rels, ask }
+    // "none" (or anything unknown) means no shot; a reply without the field falls back to the offline reader.
+    let shot = match v["shot"].as_str() {
+        Some(_) => parse_enum(&v["shot"]),
+        None => read_shot(text),
+    };
+    Turn { fields, known, shot: None, rels, ask }.with_shot(shot)
 }
 
 async fn claude_turn(g: &Claude, req: &ChatRequest, text: &str, today: NaiveDate, asked: usize) -> Result<Turn, String> {
@@ -678,14 +757,14 @@ mod tests {
     #[test]
     fn goals_name_the_framing() {
         let mut b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
-        assert_eq!(serde_json::to_value(goals_for(&b, &[])).unwrap(), json!([{"use": "sun_between"}]));
+        assert_eq!(serde_json::to_value(goals_for(&b, None, &[])).unwrap(), json!([{"use": "sun_between"}]));
         b.framing = Framing::Behind;
-        assert_eq!(goals_for(&b, &[])[0].name(), "sun_behind");
+        assert_eq!(goals_for(&b, None, &[])[0].name(), "sun_behind");
         b.framing = Framing::Clear;
-        assert_eq!(goals_for(&b, &[])[0].name(), "sun_clear");
+        assert_eq!(goals_for(&b, None, &[])[0].name(), "sun_clear");
         // object goals follow, as data: OBJECT_KINDS where the word names one, else the user's word
         assert_eq!(
-            serde_json::to_value(goals_for(&b, &read_rels("fountain in front of a tower at sunset"))).unwrap(),
+            serde_json::to_value(goals_for(&b, None, &read_rels("fountain in front of a tower at sunset"))).unwrap(),
             json!([{"use": "sun_clear"}, {"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "building"}}}])
         );
     }
@@ -723,7 +802,7 @@ mod tests {
         let lib = golden_core::library::seeds();
         let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15"})).unwrap();
         let rels = read_rels("fountain in front of a tower");
-        let g = goals_for(&b, &rels);
+        let g = goals_for(&b, None, &rels);
         let obj = |id: &str, kind: &str, lat: f64| contracts::Object {
             id: id.into(), kind: kind.into(), lat, lon: 0.0, base_m: 0.0, top_m: 10.0, radius_m: 2.0, source: "test".into(), name: None,
         };
@@ -731,7 +810,7 @@ mod tests {
         let objects = [obj("t:1", "tree", 0.0005), obj("t:2", "building", 0.001)];
         let inputs = golden_core::search::Inputs { library: &lib, objects: &objects };
         assert!(!checkable(&g[1], &inputs, &b.area));
-        let tree_first = goals_for(&b, &read_rels("tree in front of a tower"));
+        let tree_first = goals_for(&b, None, &read_rels("tree in front of a tower"));
         assert!(checkable(&tree_first[1], &inputs, &b.area), "tree + tower->building bind");
         // the caveat keeps the user's words
         assert_eq!(cant_check_note(&rels, Event::Sunset).unwrap(), "I can't place the fountain or the tower yet; searching for the sunset part.");
@@ -741,7 +820,7 @@ mod tests {
     fn only_library_goals_are_checkable() {
         let lib = golden_core::library::seeds();
         let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
-        let g = goals_for(&b, &read_rels("fountain in front of a tower"));
+        let g = goals_for(&b, None, &read_rels("fountain in front of a tower"));
         let none = golden_core::search::Inputs { library: &lib, objects: &[] };
         assert!(checkable(&g[0], &none, &b.area), "sun_between is a seed (051)");
         // in_front is a seed too (052), but there's no fountain known here
@@ -986,6 +1065,49 @@ mod tests {
         assert_eq!(r.brief.unwrap().goals.len(), 2);
         assert!(r.note.unwrap().starts_with("I can't place the fountain"));
         assert!(!names_any(&r.sheet.unwrap().title, &["fountain"]));
+    }
+
+    #[test]
+    fn shots_only_from_plain_phrases() {
+        assert_eq!(read_shot("an open view, the sun right down to the horizon"), Some(Shot::OpenHorizon));
+        assert_eq!(read_shot("Sun touching the horizon at sunset"), Some(Shot::OpenHorizon));
+        assert_eq!(read_shot("the sun in a wide gap in the skyline"), Some(Shot::WideGap));
+        assert_eq!(read_shot("sunset with room around the sun"), Some(Shot::WideGap));
+        for t in [HERO_LA, PRINCETON, "A clear view of the sun", "Sun behind a building (silhouette)", "fountain in front of a tower"] {
+            assert_eq!(read_shot(t), None, "{t}");
+        }
+    }
+
+    #[test]
+    fn a_shot_picks_its_seed_and_sets_the_framing() {
+        let v = json!({"place": "", "date": "", "event": "sunset", "standing": "any", "framing": "clear", "shot": "wide_gap",
+                       "known": [], "ready": true, "question": "", "choices": [], "objects": []});
+        let t = turn_from_model("sun framed by the skyline", &v);
+        assert_eq!((t.shot, t.fields.framing), (Some(Shot::WideGap), Framing::Between));
+        assert!(t.known.contains(&Topic::Framing));
+        let none = turn_from_model("the sun down to the horizon", &json!({"shot": "none"}));
+        assert_eq!(none.shot, None, "the model's \"none\" wins over the offline reader");
+        let missing = turn_from_model("the sun down to the horizon", &json!({}));
+        assert_eq!(missing.shot, Some(Shot::OpenHorizon));
+        let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15"})).unwrap();
+        assert_eq!(goals_for(&b, Some(Shot::OpenHorizon), &[])[0].name(), "open_horizon");
+        assert_eq!(goals_for(&b, Some(Shot::WideGap), &read_rels("tree in front of a tower"))[0].name(), "sun_wide_gap");
+        let lib = golden_core::library::seeds();
+        for s in [Shot::OpenHorizon, Shot::WideGap] {
+            assert!(lib.iter().any(|f| f.name == s.name()), "{} is a seed", s.name());
+        }
+    }
+
+    /// The toy city has no open horizon or wide gap (no spots, a 422), so this checks the goals run without
+    /// objects; spots on the real demo areas are checked live (task 070 report).
+    #[test]
+    fn the_lab_shots_run_without_objects() {
+        let b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15"})).unwrap();
+        let lib = golden_core::library::seeds();
+        let none = golden_core::search::Inputs { library: &lib, objects: &[] };
+        for s in [Shot::OpenHorizon, Shot::WideGap] {
+            assert!(checkable(&goals_for(&b, Some(s), &[])[0], &none, &b.area), "{}", s.name());
+        }
     }
 
     #[tokio::test]

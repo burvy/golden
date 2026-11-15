@@ -572,7 +572,8 @@ Response (`ChatReply`): exactly one of `ask` or (`brief` + `sheet`).
   and goals the search can't score yet ending in ` (not checked yet)`.
 - `ask.choices`: quick replies, the default first. May be empty (free text).
 - `brief`: the brief the chat settled on, including its `goals` (see [Goals](#goals-and-cost-functions)): the sun goal
-  for the framing (`{"use": "sun_between"}`) plus object goals as data, with kinds in the user's words
+  for the framing (`{"use": "sun_between"}`), or `open_horizon` / `sun_wide_gap` when the user asks for the sun right
+  down to the horizon / framed with room around it (the framing is then `clear` / `between`), plus object goals as data, with kinds in the user's words
   (`{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`). `sheet`: the `CallSheet` (its
   `brief` may be relaxed or widened from it); its `steps` start with a `chat` step.
 - `note`: one plain sentence to show with the results, e.g. what the search couldn't check yet. Left out when empty.
