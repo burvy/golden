@@ -11,6 +11,10 @@
 //! 3. **Fast pass.** Work out the sun's path once for the whole area (`SunTrack`, from the flat
 //!    sunset back to 20° up). For each candidate, trace its skyline over only the azimuths that
 //!    path crosses, plus room either side for gaps. `score::look` and `score::score` rate it.
+//!    This runs as a funnel over the brief's goals (`library::goals_of`, `[sun_<framing>]` when
+//!    there are none): gates (`must`) cheapest tier first, dropping a candidate at the first 0,
+//!    then the weighted sum of the goal scores. Features are computed lazily per candidate, so
+//!    the skyline is only traced if an expression needs a Skyline feature.
 //! 4. **Pick.** Normalise the scores to 0..1 and take the best, at least `min_spacing_m` apart.
 //! 5. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
 //!    the times on the cards are exact to the second, and write the reasons.
@@ -18,11 +22,14 @@
 //! The sun moves less than 0.01° across an 800 m area, so one track serves every candidate.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use contracts::{Brief, DsmGrid, Event, HeatGrid, HorizonPoint, Spot, Standing, EARTH_R};
+use contracts::{Brief, CostFn, DsmGrid, Event, HeatGrid, HorizonPoint, Rated, Spot, Standing, EARTH_R};
 use contracts::search::MAX_HEAT_SIDE;
 
+use crate::expr::{score_of, ExprError, Node};
+use crate::features::{self, Feature};
 use crate::horizon::{normalize_az, ray_max_below, Eye};
-use crate::score::{self, SkyWindow, SunTrack, TrackSample, FLANK_LOOK_DEG, GAP_SEARCH_DEG, TRACK_TOP_DEG};
+use crate::library::{self, Ready};
+use crate::score::{self, Look, SkyWindow, SunTrack, TrackSample, FLANK_LOOK_DEG, GAP_SEARCH_DEG, TRACK_TOP_DEG};
 use crate::sun::{sun_position, sunset};
 use crate::sunblock::sun_block;
 
@@ -70,6 +77,8 @@ pub enum SearchError {
     AreaOffGrid,
     /// The sun doesn't rise or set that day (polar day or night).
     NoSunEvent,
+    /// A goal names an unknown cost function or has a bad expression. Every problem, with its place.
+    BadGoals(Vec<ExprError>),
 }
 
 impl std::fmt::Display for SearchError {
@@ -79,6 +88,10 @@ impl std::fmt::Display for SearchError {
             SearchError::BadArea => write!(f, "area needs finite lat/lon and a positive radius"),
             SearchError::AreaOffGrid => write!(f, "the area's centre is outside the height map"),
             SearchError::NoSunEvent => write!(f, "the sun doesn't rise or set there that day"),
+            SearchError::BadGoals(errs) => {
+                let lines: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                write!(f, "bad goals: {}", lines.join("; "))
+            }
         }
     }
 }
@@ -91,9 +104,14 @@ pub fn skyline_need_m(area_radius_m: f64) -> f64 {
     area_radius_m + SKYLINE_RADIUS_M
 }
 
-/// Rank spots in `brief.area` for `brief`. `utc_offset_s` is the offset of the local day
-/// (e.g. -25200 for PDT), used for the times in the results.
+/// Rank spots in `brief.area` for `brief`, with the seed library. `utc_offset_s` is the offset
+/// of the local day (e.g. -25200 for PDT), used for the times in the results.
 pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
+    search_with(grid, brief, &library::seeds(), utc_offset_s)
+}
+
+/// `search`, with the cost functions the brief's `use` goals can name.
+pub fn search_with(grid: &DsmGrid, brief: &Brief, library: &[CostFn], utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
     let date = NaiveDate::parse_from_str(&brief.date, "%Y-%m-%d").map_err(|_| SearchError::BadDate(brief.date.clone()))?;
     let area = &brief.area;
     if ![area.lat, area.lon, area.radius_m].iter().all(|x| x.is_finite()) || area.radius_m <= 0.0 {
@@ -102,6 +120,8 @@ pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<Search
     if !on_grid(grid, area.lat, area.lon) {
         return Err(SearchError::AreaOffGrid);
     }
+    let goals = library::ready(&library::goals_of(brief), library).map_err(SearchError::BadGoals)?;
+    let funnel = Funnel::new(&goals);
     let track = sun_track(area.lat, area.lon, date, brief.event).ok_or(SearchError::NoSunEvent)?;
     let layout = HeatLayout::for_area(area.lat, area.lon, area.radius_m);
     let top_m = grid_top(grid);
@@ -115,8 +135,15 @@ pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<Search
         if !standing_ok(brief.standing, site.standing) {
             continue;
         }
-        fill_skyline(grid, lat, lon, site.ground_m + EYE_M, top_m, n_az, &mut sky);
-        let raw = score::score(brief.framing, &score::look(&track, &sky));
+        let mut look = None;
+        let mut value = |f: Feature| {
+            feature_value(f, &site, &mut look, || {
+                fill_skyline(grid, lat, lon, site.ground_m + EYE_M, top_m, n_az, &mut sky);
+                score::look(&track, &sky)
+            })
+        };
+        // A candidate dropped by a gate still counts as searched, with 0 on the heatmap.
+        let raw = funnel.rank(&mut value).unwrap_or(0.0);
         scored.push(Scored { cell, lat, lon, site, raw });
     }
 
@@ -134,7 +161,7 @@ pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<Search
         .enumerate()
         .map(|(i, s)| {
             fill_skyline(grid, s.lat, s.lon, s.site.ground_m + EYE_M, top_m, n_az, &mut sky);
-            let ctx = SpotContext { brief, date, utc_offset_s, track: &track, sky: &sky };
+            let ctx = SpotContext { brief, goals: &goals, date, utc_offset_s, track: &track, sky: &sky };
             make_spot(&ctx, s, i as u32 + 1, norm(s.raw))
         })
         .collect();
@@ -369,6 +396,7 @@ fn pick(scored: &[Scored], n: usize, spacing_m: f64) -> Vec<Scored> {
 
 struct SpotContext<'a> {
     brief: &'a Brief,
+    goals: &'a [Ready],
     date: NaiveDate,
     utc_offset_s: i32,
     track: &'a SunTrack,
@@ -387,7 +415,14 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         Standing::Roof => format!("Roof {:.0} m above the street", s.site.above_street_m),
         _ => "At street level".to_string(),
     };
-    let why = score::why(ctx.brief.framing, ctx.brief.event, &look, sky, &sun, place);
+    let mut value = |f: Feature| feature_value(f, &s.site, &mut Some(look), || look);
+    let scores: Vec<Rated> = ctx.goals.iter().map(|g| rate(g, &mut value)).collect();
+    let why = if ctx.brief.goals.is_empty() {
+        score::why(ctx.brief.framing, ctx.brief.event, &look, sky, &sun, place)
+    } else {
+        let golden = format!("{} min of golden hour with the sun in view", sun.golden_min_visible);
+        scores.iter().map(|r| r.why.clone()).chain([golden, place]).collect()
+    };
     let (lat, lon) = (round5(s.lat), round5(s.lon));
     Spot {
         id: spot_id(lat, lon, s.site.standing),
@@ -401,8 +436,75 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         sun,
         why,
         building_id: None,
-        scores: Vec::new(),
+        scores,
     }
+}
+
+// ---- the funnel -------------------------------------------------------------------------
+
+/// The brief's goals, arranged for the candidate loop.
+struct Funnel<'a> {
+    /// Every `must`: a cost function's own gate, and the score of a goal marked `must`.
+    /// Cheapest tier first, so a candidate is dropped before anything expensive is computed.
+    gates: Vec<&'a Node>,
+    /// (score, weight) of the goals that rank. If no goal has a weight, all goals rank equally.
+    ranked: Vec<(&'a Node, f64)>,
+}
+
+impl<'a> Funnel<'a> {
+    fn new(goals: &'a [Ready]) -> Funnel<'a> {
+        let mut gates: Vec<&Node> = goals.iter().flat_map(|g| g.cost.must.iter().chain(g.must.then_some(&g.cost.score))).collect();
+        gates.sort_by_key(|n| n.tier());
+        let mut ranked: Vec<(&Node, f64)> = goals.iter().filter(|g| g.weight > 0.0).map(|g| (&g.cost.score, g.weight)).collect();
+        if ranked.is_empty() {
+            ranked = goals.iter().map(|g| (&g.cost.score, 1.0 / goals.len() as f64)).collect();
+        }
+        Funnel { gates, ranked }
+    }
+
+    /// The candidate's ranking score, or None if a gate drops it.
+    fn rank(&self, value: &mut impl FnMut(Feature) -> f64) -> Option<f64> {
+        if self.gates.iter().any(|g| score_of(g, value) <= 0.0) {
+            return None;
+        }
+        // reduce, not a fold from 0.0: one goal of weight 1 gives back its score bit for bit.
+        Some(self.ranked.iter().map(|(n, w)| w * score_of(n, value)).reduce(|a, b| a + b).unwrap_or(0.0))
+    }
+}
+
+/// One feature for one candidate. Point features read the site; the first Skyline feature
+/// computes the candidate's `Look` with `trace`, later ones reuse it.
+fn feature_value(f: Feature, site: &Site, look: &mut Option<Look>, trace: impl FnOnce() -> Look) -> f64 {
+    if let Some(v) = features::point_value(f, site, EYE_M) {
+        return v;
+    }
+    let look = look.get_or_insert_with(trace);
+    features::sun_value(f, look).expect("only Point and Skyline features exist so far")
+}
+
+/// A spot's score and reason for one goal: the function's `about` plus the numbers it used.
+fn rate(goal: &Ready, value: &mut impl FnMut(Feature) -> f64) -> Rated {
+    let score = score_of(&goal.cost.score, value);
+    let mut used: Vec<Feature> = Vec::new();
+    goal.cost.score.each_feature(&mut |f| {
+        if !used.contains(&f) {
+            used.push(f);
+        }
+    });
+    let numbers: Vec<String> = used
+        .iter()
+        .take(4)
+        .map(|&f| {
+            let v = value(f);
+            if v.abs() <= 1.0 {
+                format!("{} {v:.2}", f.name())
+            } else {
+                format!("{} {v:.1}", f.name())
+            }
+        })
+        .collect();
+    let why = if numbers.is_empty() { goal.cost.about.clone() } else { format!("{} ({})", goal.cost.about, numbers.join(", ")) };
+    Rated { goal: goal.name.clone(), score: (score * 1000.0).round() / 1000.0, why }
 }
 
 /// Stable id for a place and standing, as in the contract: `s-34.04912--118.25087-roof`.
@@ -668,6 +770,85 @@ mod tests {
             for s in out.spots.iter().take(2) {
                 eprintln!("  {} {:.2} {:?}", s.id, s.score, s.why);
             }
+        }
+    }
+
+    // ---- goals and the funnel ----
+
+    fn with_goals(b: Brief, goals: &str) -> Brief {
+        Brief { goals: serde_json::from_str(goals).unwrap(), ..b }
+    }
+
+    #[test]
+    fn no_goals_is_the_framing_goal() {
+        let g = grid(400, tower(0.0, 0.0, 80.0, 15.0));
+        for framing in [Framing::Clear, Framing::Between, Framing::Behind] {
+            let old = search(&g, &brief(100.0, Standing::Any, framing), PDT).unwrap();
+            let name = crate::library::sun_goal_name(framing);
+            let new = search(&g, &with_goals(brief(100.0, Standing::Any, framing), &format!(r#"[{{"use":"{name}"}}]"#)), PDT).unwrap();
+            assert_eq!(old.heat, new.heat);
+            let pick = |o: &SearchOutput| o.spots.iter().map(|s| (s.id.clone(), s.score, s.scores.clone())).collect::<Vec<_>>();
+            assert_eq!(pick(&old), pick(&new));
+            assert!(old.spots.iter().all(|s| s.scores.len() == 1 && s.scores[0].goal == name && s.scores[0].score > 0.0));
+        }
+    }
+
+    #[test]
+    fn a_point_gate_drops_candidates_and_keeps_them_off_the_ranking() {
+        // Same block as the standing test: a "roof" must leaves only roof spots, like standing=roof.
+        let g = grid(400, tower(0.0, 0.0, 80.0, 15.0));
+        let b = with_goals(
+            brief(100.0, Standing::Any, Framing::Clear),
+            r#"[{"use":"sun_clear"},{"def":{"name":"on_a_roof","about":"Standing on a roof","score":{"f":"roof"}},"must":true}]"#,
+        );
+        let out = search(&g, &b, PDT).unwrap();
+        let roof = search(&g, &brief(100.0, Standing::Roof, Framing::Clear), PDT).unwrap();
+        assert!(!out.spots.is_empty());
+        assert!(out.spots.iter().all(|s| s.standing == Standing::Roof));
+        let ids = |o: &SearchOutput| o.spots.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&out), ids(&roof), "a weight-0 must doesn't change the ranking");
+        let s = &out.spots[0];
+        assert_eq!(s.scores.iter().map(|r| r.goal.as_str()).collect::<Vec<_>>(), ["sun_clear", "on_a_roof"]);
+        assert_eq!(s.scores[1].score, 1.0);
+        assert_eq!(s.scores[1].why, "Standing on a roof (roof 1.00)");
+        assert_eq!(s.why[0], s.scores[0].why, "with goals, the reasons lead with the goals");
+        // Dropped ground candidates were searched and show as 0 on the heatmap.
+        let any = search(&g, &brief(100.0, Standing::Any, Framing::Clear), PDT).unwrap();
+        assert_eq!(out.searched, any.searched);
+        assert!(out.heat.values.iter().flatten().filter(|&&v| v == 0.0).count() >= (any.searched - roof.searched) as usize);
+    }
+
+    #[test]
+    fn gates_run_cheapest_first_and_skylines_are_lazy() {
+        let goals: Vec<contracts::Goal> = serde_json::from_str(
+            r#"[{"use":"sun_clear","must":true},{"def":{"name":"roof","about":"On a roof","score":{"f":"roof"}},"must":true}]"#,
+        )
+        .unwrap();
+        let ready = crate::library::ready(&goals, &crate::library::seeds()).unwrap();
+        let funnel = Funnel::new(&ready);
+        assert_eq!(funnel.gates.iter().map(|n| n.tier()).collect::<Vec<_>>(), [crate::features::Tier::Point, crate::features::Tier::Skyline]);
+        let ground = Site { ground_m: 0.0, standing: Standing::Ground, above_street_m: 0.0 };
+        let mut traced = 0;
+        let mut look = None;
+        let rank = funnel.rank(&mut |f| {
+            feature_value(f, &ground, &mut look, || {
+                traced += 1;
+                panic!("a ground spot fails the roof gate before any skyline is traced")
+            })
+        });
+        assert_eq!((rank, traced), (None, 0));
+    }
+
+    #[test]
+    fn bad_goals_are_reported_not_searched() {
+        let g = grid(200, |_, _| None);
+        let b = with_goals(brief(50.0, Standing::Any, Framing::Clear), r#"[{"use":"sun_clear"},{"use":"golden_retriever"}]"#);
+        match search(&g, &b, PDT) {
+            Err(SearchError::BadGoals(errs)) => {
+                assert_eq!(errs.len(), 1);
+                assert!(errs[0].to_string().starts_with("goals[1].use: no cost function \"golden_retriever\""), "{errs:?}");
+            }
+            other => panic!("expected BadGoals, got {other:?}"),
         }
     }
 }
