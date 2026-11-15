@@ -30,6 +30,10 @@ const SEEDS: &[(&str, &str)] = &[
     ("sunrise_beside.json", include_str!("../../../library/sunrise_beside.json")),
     ("sunrise_behind.json", include_str!("../../../library/sunrise_behind.json")),
     ("towers_over.json", include_str!("../../../library/towers_over.json")),
+    ("sun_down_the_street.json", include_str!("../../../library/sun_down_the_street.json")),
+    ("sun_keyhole.json", include_str!("../../../library/sun_keyhole.json")),
+    ("skyline_glow.json", include_str!("../../../library/skyline_glow.json")),
+    ("skyline_glow_at_sunrise.json", include_str!("../../../library/skyline_glow_at_sunrise.json")),
 ];
 
 /// The built-in cost functions.
@@ -146,6 +150,38 @@ mod tests {
         for framing in [Framing::Clear, Framing::Between, Framing::Behind] {
             assert!(lib.iter().any(|f| f.name == sun_goal_name(framing)));
         }
+    }
+
+    #[test]
+    fn the_lab_promote_list_is_seeded_and_each_about_names_its_brief() {
+        // docs/library-lab.md, promote list: tasks 070 (the first 11) and 068 (the last 4).
+        let promoted = [
+            "open_horizon", "sun_wide_gap", "sun_down_the_street", "sun_keyhole",
+            "sunset_behind", "sunset_beside", "sunset_between_two", "tower_lit_at_sunset",
+            "sunrise_between_two", "tower_lit_at_sunrise", "sunrise_beside", "sunrise_behind",
+            "skyline_glow", "skyline_glow_at_sunrise", "towers_over",
+        ];
+        let lib = seeds();
+        for name in promoted {
+            let f = lib.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("{name} is not a seed"));
+            assert!(f.about.contains("For briefs like '"), "{name}: {}", f.about);
+        }
+    }
+
+    #[test]
+    fn the_street_and_keyhole_shots_are_sun_only_and_the_glow_needs_two_objects() {
+        let lib = seeds();
+        let get = |n: &str| lib.iter().find(|f| f.name == n).unwrap();
+        for n in ["sun_down_the_street", "sun_keyhole"] {
+            assert!(get(n).params.is_empty(), "{n}");
+            assert!(get(n).must.is_some(), "{n}");
+        }
+        for n in ["skyline_glow", "skyline_glow_at_sunrise"] {
+            assert_eq!(get(n).params, ["a", "b"], "{n}");
+        }
+        // down the street's must is Point tier (no roof), so it drops points before any trace.
+        let street = check(get("sun_down_the_street")).unwrap();
+        assert_eq!(street.must.as_ref().map(|m| m.tier()), Some(Tier::Point));
     }
 
     #[test]
