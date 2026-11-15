@@ -30,6 +30,8 @@ takes about 12 minutes with `LAB_THREADS=9` (18 places x 3 days x 28 scenarios).
 are measured under that load, so compare them within a row, not across rounds. `--report` rebuilds the
 generated section from the last `--write`'s saved rows (`cache/library_lab/{rows,shots,places}.json`)
 without searching.
+To test a new entry without writing Rust, and to fetch or add places, see `docs/library-lab-howto.md`
+(`--try NAME`, `--plan`, `--fetch`, `--at NAME,LAT,LON`).
 `--radius M` runs with another area radius (default 300 m; printed only, never written). A place
 whose tiles for that radius aren't all cached is skipped. `LAB_DEBUG=1` prints each search's funnel
 stages and picked spots with their scores (that's how the round 2 brief bug below was found).

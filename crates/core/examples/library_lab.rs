@@ -1,7 +1,7 @@
 //! Library lab: which cheap gates cut candidates before the expensive work, without losing the
 //! spots an ungated search ranks best? (task 062, docs/library-lab.md)
 //!
-//! `cargo run -p golden-core --release --example library_lab -- [--write | --report] [--place NAME] [--scenario KEY] [--gate NAME] [--radius M]`
+//! `cargo run -p golden-core --release --example library_lab -- [--write | --report | --plan] [--place NAME] [--at NAME,LAT,LON] [--fetch] [--try NAME [--event sunrise] [--standing ground|roof]] [--scenario KEY] [--gate NAME] [--radius M]`
 //! (`LAB_THREADS=N`: places run N at a time, default 6; `--report` rebuilds the doc from the last `--write`.)
 //!
 //! For every place (real height maps, cache only) and day (Nov 14, Jun 21), each scenario (a brief's
@@ -26,11 +26,19 @@
 //! - **what-if**: needs a number fixed per brief (the sunset azimuth), which no Point feature gives
 //!   yet. It shows what such a feature would buy; it is not saved.
 //!
-//! Cache only: a place whose height-map tiles aren't all on disk is skipped, never fetched.
+//! Cache only by default: a place whose height-map tiles aren't all on disk is skipped. `--fetch`
+//! downloads the missing tiles (needs a Vexcel key; only with `--place` or `--at`, so a run never
+//! fetches every place). `--plan` prints, per place, the tiles it needs and how many are missing,
+//! without searching or fetching. `--at NAME,LAT,LON` runs one place of your own instead of the list.
+//! `--try NAME` tests one library entry (`library/NAME.json`) with no Rust to write: its brief is the
+//! entry's own score as a must goal, and the entry (score + its must) replaces it, so recall is
+//! "same top 10 with its must" and prune is what its must alone drops. Param `a` is the tallest
+//! building, `b` the next tallest. Sunset at any standing unless `--event` / `--standing` say otherwise.
 //! `--write` replaces the generated part of docs/library-lab.md and writes the raw rows to
 //! `cache/library_lab/rows.json`.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
@@ -992,6 +1000,97 @@ async fn cached_grid(place: &Place, radius_m: f64) -> Result<Option<DsmGrid>, Bo
     Ok(Some(vexcel::get_dsm_with(place.lat, place.lon, need, &opts).await?))
 }
 
+/// The tiles a place's height map needs (the lab's plan: coarse ~0.9 m tiles, plus the fine tiles
+/// under the very centre), and the ones not on disk yet.
+fn lab_tiles(place: &Place, radius_m: f64) -> (vexcel::DsmOptions, Vec<vexcel::tiles::TileId>, Vec<vexcel::tiles::TileId>) {
+    let opts = vexcel::DsmOptions { near_radius_m: 1.0, max_concurrency: 2, ..vexcel::DsmOptions::default() };
+    let tiles = vexcel::plan_tiles(place.lat, place.lon, skyline_need_m(radius_m), opts.near_radius_m);
+    let missing = tiles.iter().copied().filter(|t| !vexcel::cache::tile_path(&opts.cache_root, *t).exists()).collect();
+    (opts, tiles, missing)
+}
+
+/// `--plan`: one line per place: tiles needed, missing, and the size of the cached ones.
+fn plan_line(place: &Place, radius_m: f64) -> String {
+    let (opts, tiles, missing) = lab_tiles(place, radius_m);
+    let bytes: u64 = tiles.iter().filter_map(|t| std::fs::metadata(vexcel::cache::tile_path(&opts.cache_root, *t)).ok()).map(|m| m.len()).sum();
+    let far = tiles.iter().filter(|t| t.level != 0).count();
+    let usable = vexcel::cached_only(&tiles, |t| !missing.contains(&t)).is_some();
+    format!(
+        "{} ({}): {} tiles ({far} coarse, {} fine), {} missing{}, {:.0} MB cached",
+        place.name,
+        place.city,
+        tiles.len(),
+        tiles.len() - far,
+        missing.len(),
+        if missing.is_empty() { String::new() } else if usable { " (only fine ones: it runs on the coarse tiles)".into() } else { " (it's skipped until fetched)".into() },
+        bytes as f64 / 1e6,
+    )
+}
+
+/// `--fetch`: download a place's missing coarse tiles (Vexcel key needed). Only the coarse ones: the
+/// lab builds its grids from those, as the doc's rows were. vexcel backs off on 429 and caches every
+/// tile on disk, so a second run fetches nothing.
+async fn fetch_coarse(place: &Place, radius_m: f64) -> Result<(), Box<dyn std::error::Error>> {
+    let (opts, tiles, missing) = lab_tiles(place, radius_m);
+    let coarse: Vec<vexcel::tiles::TileId> = missing.into_iter().filter(|t| t.level != 0).collect();
+    if coarse.is_empty() {
+        return Ok(());
+    }
+    println!("== {} ({}): fetching {} of {} tiles (~13 MB each)", place.name, place.city, coarse.len(), tiles.len());
+    vexcel::ensure_cached(&coarse, &opts).await.map_err(|e| format!("{}: fetch failed: {e}", place.name))?;
+    Ok(())
+}
+
+/// `--at NAME,LAT,LON`: a place of your own. Its printed times use Princeton's UTC offset.
+fn parse_at(a: &str) -> Result<Place, String> {
+    let parts: Vec<&str> = a.split(',').map(str::trim).collect();
+    let [name, lat, lon] = parts[..] else { return Err(format!("--at {a:?}: want NAME,LAT,LON")) };
+    let lat: f64 = lat.parse().map_err(|e| format!("--at latitude {lat:?}: {e}"))?;
+    let lon: f64 = lon.parse().map_err(|e| format!("--at longitude {lon:?}: {e}"))?;
+    if !(lat.abs() <= 85.0 && lon.abs() <= 180.0) || name.is_empty() {
+        return Err(format!("--at {a:?}: want a name, then latitude and longitude in degrees"));
+    }
+    Ok(Place { name: Box::leak(name.to_string().into_boxed_str()), city: "custom", lat, lon })
+}
+
+/// The entry `--try` tests (set once in `main`, read by `try_goals`).
+static TRY: OnceLock<CostFn> = OnceLock::new();
+
+/// `--try`'s brief: the entry's score alone, its params bound to the towers, as a must goal.
+fn try_goals(c: &Ctx) -> String {
+    let f = TRY.get().expect("--try entry set");
+    let mut score = serde_json::to_value(&f.score).expect("score is JSON");
+    let objs: Vec<(String, serde_json::Value)> =
+        f.params.iter().zip(towers(c)).map(|(p, o)| (p.clone(), serde_json::from_str(&o).expect("tower ref is JSON"))).collect();
+    bind(&mut score, &objs);
+    let def = serde_json::json!({ "name": format!("{}_score", f.name), "about": f.about, "score": score });
+    serde_json::json!([{ "def": def, "must": true, "weight": 1 }]).to_string()
+}
+
+/// `--try NAME`: one made-up scenario for the entry, and the entry as the gate standing in for its goal.
+fn try_setup(name: &str, args: &[String], library: &[CostFn]) -> Result<(Vec<Scenario>, Vec<Gate>), String> {
+    let f = library.iter().find(|f| f.name == name).ok_or(format!("--try: no library/{name}.json (or its name field differs)"))?;
+    if f.must.is_none() {
+        return Err(format!("--try {name}: it has no must, so there's nothing to prune; an entry is kept for what its must drops"));
+    }
+    let event = match arg(args, "--event").as_deref() {
+        None | Some("sunset") => Event::Sunset,
+        Some("sunrise") => Event::Sunrise,
+        Some(e) => return Err(format!("--event {e}: want sunset or sunrise")),
+    };
+    let standing = match arg(args, "--standing").as_deref() {
+        None | Some("any") => Standing::Any,
+        Some("ground") | Some("street") => Standing::Ground,
+        Some("roof") => Standing::Roof,
+        Some(s) => return Err(format!("--standing {s}: want any, ground or roof")),
+    };
+    let _ = TRY.set(f.clone());
+    let name: &'static str = Box::leak(name.to_string().into_boxed_str());
+    let key: &'static str = Box::leak(format!("try-{name}").into_boxed_str());
+    let scene = Scenario { key, about: "--try: the entry's own score as a must (its must left out)", standing, event, goals: try_goals, second: false };
+    Ok((vec![scene], vec![Gate { replaces: Some(0), ..entry(name, &[key]) }]))
+}
+
 // ---- main -----------------------------------------------------------------------------
 
 fn arg(args: &[String], name: &str) -> Option<String> {
@@ -1248,6 +1347,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("rebuilt docs/library-lab.md from cache/library_lab");
         return Ok(());
     }
+    let custom: Option<Place> = arg(&args, "--at").map(|a| parse_at(&a)).transpose()?;
+    let chosen: Vec<&Place> = match &custom {
+        Some(p) => vec![p],
+        None => PLACES.iter().filter(|p| only_place.as_deref().map_or(true, |n| n == p.name)).collect(),
+    };
+    if chosen.is_empty() {
+        return Err(format!("no place named {:?}", only_place.unwrap_or_default()).into());
+    }
+    if args.iter().any(|a| a == "--plan") {
+        for place in &chosen {
+            println!("{}", plan_line(place, radius_m));
+        }
+        return Ok(());
+    }
+    let fetch = args.iter().any(|a| a == "--fetch");
+    if fetch && only_place.is_none() && custom.is_none() {
+        return Err("--fetch only with --place NAME or --at NAME,LAT,LON (never fetch every place at once)".into());
+    }
+    if write && custom.is_some() {
+        return Err("--write only with the built-in places (the doc's table is for those)".into());
+    }
+    if fetch {
+        for place in &chosen {
+            fetch_coarse(place, radius_m).await?;
+        }
+    }
+    // From here on, cache only: with a Vexcel key around, building a grid would otherwise download
+    // the fine tile under each place's centre, and the doc's rows are measured without it.
+    std::env::set_var(vexcel::auth::OFFLINE_VAR, "1");
     let kit = match costar::Kit::from_env() {
         Ok(k) => Some(k),
         Err(e) => {
@@ -1255,13 +1383,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
-    let scenes = scenarios();
-    let gates = gates();
+    let tried = arg(&args, "--try");
+    if write && tried.is_some() {
+        return Err("--write only without --try (the doc's table is for the lab's own scenarios)".into());
+    }
+    let (scenes, gates) = match &tried {
+        Some(name) => try_setup(name, &args, &library)?,
+        None => (scenarios(), gates()),
+    };
     let mut rows: Vec<Row> = Vec::new();
     let mut shots: Vec<Shot> = Vec::new();
     let mut places_run: Vec<String> = Vec::new();
 
-    let chosen: Vec<&Place> = PLACES.iter().filter(|p| only_place.as_deref().map_or(true, |n| n == p.name)).collect();
     // places run in parallel (each search is single-threaded); LAB_THREADS=1 for clean timings
     let threads: usize = std::env::var("LAB_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(6).max(1);
     let shared = Shared {
@@ -1279,7 +1412,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let t = Instant::now();
             match cached_grid(place, radius_m).await? {
                 Some(grid) => loaded.push((place, grid, t.elapsed())),
-                None => println!("== {} ({}): height map not fully cached, skipped", place.name, place.city),
+                None => println!("== {} ({}): height map not fully cached, skipped (--plan shows what's missing, --fetch gets it)", place.name, place.city),
             }
         }
         let outs: Vec<Res<PlaceOut>> = std::thread::scope(|s| {
