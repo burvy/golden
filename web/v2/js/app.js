@@ -201,7 +201,7 @@ function renderFunnel() {
     <div class="fsteps">${st.map((s, i) => `<div class="fs ${s.top ? 'last' : ''}"><span class="num">${s.top ? `Top ${s.n}` : fmt(s.n)}</span></div>`).join('')}</div>
     <div class="fcap">${st.map((s, i) => {
       if (s.top) return `<div>${fresh ? `${fresh} new since your edit` : looked ? `${looked} of ${s.n} checked by the AI in photos` : 'Best spots, spaced apart'}${fresh ? `<br><button class="check" id="checknew" data-needs-server>Check the new ones</button>` : ''}</div>`;
-      if (s.goal == null) return `<div>${esc(s.label)}${i === 0 ? `, ${esc(area.name || `${area.radius_m} m around the pin`)}` : ''}</div>`;
+      if (s.goal == null) return `<div>${esc(s.label)}${i === 0 ? `<span class="wide">, ${esc(area.name || `${area.radius_m} m around the pin`)}</span>` : ''}</div>`;
       return `<div><b style="--c:${COLORS[s.k % COLORS.length]}"></b>${esc(s.label || goalWords(s.k).title)}</div>`;
     }).join('')}</div>`;
   const ck = $('#checknew'); if (ck) ck.onclick = checkNew;
@@ -223,7 +223,7 @@ function renderLayers() {
   $('#layers').querySelectorAll('button').forEach(b => (b.onclick = () => { S.layer = b.dataset.l === 'all' ? 'all' : +b.dataset.l; renderLayers(); renderGoals(); drawMap(); }));
   const k = S.layer, spacing = Math.round(S.result.spacing_m ?? 40);
   const pins = `<div class="pins"><span class="pin">1</span><span class="pin">2</span><span class="pin">3</span> The top ${S.K} spots, at least ${spacing} m apart
-    <button type="button" id="moreK">${S.K === 3 ? 'Show top 10' : 'Show top 3'}</button></div>`;
+    <button type="button" id="moreK">${S.K === 3 ? 'Show top 10' : 'Show top 3'}</button></div>${matchMedia('(pointer:coarse)').matches ? '<div class="mute">Two fingers move and zoom the map</div>' : ''}`;
   $('#legend').hidden = false;
   $('#legend').innerHTML = (k === 'all'
     ? `<div class="lrow"><span class="ramp" style="background:${RAMP_CSS}"></span><span>Colour: how well <b>every</b> point fits${S.run.droppedBy.some(x => x >= 0) ? '. Shaded: dropped by a must' : ''}</span></div>`
@@ -321,6 +321,7 @@ fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(2500) }).then(r => { i
 const demo = params.get('demo');
 (async () => {
   if (!demo) return;
+  if (demo === 'live') return send(params.get('q') || 'fountain in front of a tower at sunset downtown LA', true, true);
   await send('fountain in front of a tower at sunset', false, true);
   if (demo === 'chat') return;
   await send('Grand Tower, 48 floors', false, true); await send('Either is fine', false, true);

@@ -102,10 +102,11 @@ export function editedGoals(brief, goals) {
 /** A result from a server that doesn't send layers yet (before task 059): one layer, the combined heat. */
 export function withLayers(result) {
   if (result.layers?.length) return result;
-  const searched = result.heat.values.filter(v => v != null).length;
+  const searched = result.heat.values.filter(v => v != null).length, goals = result.brief.goals || [], one = goals.length === 1 ? goals[0] : null;
   const best = Math.max(0, ...result.heat.values.filter(v => v != null));
-  return { ...result, legacy: true, spacing_m: result.spacing_m ?? Math.max(40, 2 * result.heat.cell_m),
-    layers: [{ goal: 'fit', weight: 1, must: false, heat: result.heat, gate: [] }],
+  return { ...result, legacy: true, brief: { ...result.brief, goals: one ? goals : [] }, spacing_m: result.spacing_m ?? Math.max(40, 2 * result.heat.cell_m),
+    // one goal: the heat is that goal's score (scaled to the best); more: the combined fit, which can't be split
+    layers: [{ goal: one ? (one.use || one.def?.name) : goals.length ? 'fit' : `sun_${result.brief.framing || 'clear'}`, weight: 1, must: false, heat: result.heat, gate: [] }],
     stages: result.stages?.length ? result.stages : [{ label: 'Somewhere to stand', n: result.searched ?? searched, goal: null }],
     objects: result.objects || [], best };
 }

@@ -20,7 +20,8 @@ export function createData(base, mode) {
   /** POST /api/chat. Returns the ChatReply, with `result` (a SearchResult with layers) once it has searched. */
   async function chat(req) {
     if (mode.fixture) return fixtureChat(req);
-    const reply = await post('/api/chat', req);
+    const { instant, ...body } = req; // instant is the page's own (demo) flag; the server rejects unknown fields
+    const reply = await post('/api/chat', body);
     if (reply.sheet) {
       const res = reply.sheet.search || await post('/api/search', reply.sheet.brief);
       reply.result = withLayers(res);
