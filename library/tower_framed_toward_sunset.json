@@ -1,0 +1,52 @@
+{
+  "name": "tower_framed_toward_sunset",
+  "about": "Tower framed toward the sunset: a looks 2-40 deg tall and lies at bearing 180-330 deg (tower_framable and tower_toward_sunset together)",
+  "params": [
+    "a"
+  ],
+  "score": {
+    "op": "and",
+    "of": [
+      {
+        "op": "and",
+        "of": [
+          {
+            "op": "gt",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "than": {
+              "num": 2
+            }
+          },
+          {
+            "op": "lt",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "than": {
+              "num": 40
+            }
+          }
+        ]
+      },
+      {
+        "op": "gt",
+        "x": {
+          "op": "bump",
+          "x": {
+            "f": "bearing",
+            "obj": "a"
+          },
+          "at": 255,
+          "width": 75
+        },
+        "than": {
+          "num": 0
+        }
+      }
+    ]
+  }
+}

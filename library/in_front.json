@@ -1,0 +1,15 @@
+{
+  "name": "in_front",
+  "about": "a in the foreground of b: both in one frame, a clearly nearer (under 0.8 of b's distance), both in view",
+  "params": ["a", "b"],
+  "must": { "op": "and", "of": [
+    { "f": "in_frame", "a": "a", "b": "b" },
+    { "op": "lt", "x": { "f": "dist", "obj": "a" }, "than": { "op": "mul", "of": [{ "f": "dist", "obj": "b" }, { "num": 0.8 }] } }
+  ] },
+  "score": { "op": "avg", "of": [
+    { "f": "in_frame", "a": "a", "b": "b" },
+    { "f": "visible", "obj": "a" },
+    { "f": "visible", "obj": "b" },
+    { "op": "ramp", "x": { "f": "size_deg", "obj": "b" }, "lo": 1, "hi": 5 }
+  ] }
+}

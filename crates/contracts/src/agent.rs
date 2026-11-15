@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::building::Contact;
-use crate::search::{default_tz, Area, Brief, Spot};
+use crate::search::{default_tz, Area, Brief, SearchResult, Spot};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +36,10 @@ pub struct CallSheet {
     /// What the agent did, in order, so the app can show its work. May be empty.
     #[serde(default)]
     pub steps: Vec<AgentStep>,
+    /// The search the spots came from (heat, goal layers, funnel stages, up to `max_spots` spots),
+    /// so the app can draw the map and re-weight goals. Left out by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchResult>,
 }
 
 /// One thing the agent did: which tool (or "read" / "plan" / "write") and what came of it.
@@ -78,4 +82,67 @@ pub struct Access {
     pub contact: Option<Contact>,
     /// Ready-to-send one-line request.
     pub ask: String,
+}
+
+/// `POST /api/chat` request: the whole conversation so far (the server keeps no state).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatRequest {
+    /// Oldest first. Starts with the user's first message; the agent's questions are sent back as `agent`.
+    pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub area: Option<Area>,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default = "default_tz")]
+    pub tz: String,
+    /// "Search now": skip any remaining questions and use the defaults.
+    #[serde(default)]
+    pub go: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRole {
+    User,
+    Agent,
+}
+
+/// `POST /api/chat` answer: either a question (`ask`) or the finished search (`brief` + `sheet`). Exactly one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatReply {
+    /// What the agent has understood so far, in plain words ("Sunset", "from a roof", "Princeton", ...).
+    /// Once searching, the agent's own defaults end in " (my pick)" and goals the search can't score yet
+    /// end in " (not checked yet)".
+    pub understood: Vec<String>,
+    #[serde(default)]
+    pub ask: Option<ChatAsk>,
+    /// The brief the chat settled on, with its `goals` (the sheet's brief may be relaxed or widened from it).
+    #[serde(default)]
+    pub brief: Option<Brief>,
+    #[serde(default)]
+    pub sheet: Option<CallSheet>,
+    /// One plain sentence to show with the results, e.g. what the search couldn't check
+    /// ("I can't place the fountain yet; searching for the sunset part."). Left out when there's nothing to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// Who ran this chat turn: model id, or "mock".
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatAsk {
+    pub question: String,
+    /// Quick replies. The first is the default the agent would pick. May be empty.
+    #[serde(default)]
+    pub choices: Vec<String>,
 }

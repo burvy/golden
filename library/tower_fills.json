@@ -1,0 +1,64 @@
+{
+  "name": "tower_fills",
+  "about": "Tower fills the frame: like the fills seed (8-25 deg tall best, and in view), plus a cheap must (2-40 deg tall) that drops points before any line-of-sight march",
+  "params": [
+    "a"
+  ],
+  "must": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 2
+        }
+      },
+      {
+        "op": "lt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 40
+        }
+      }
+    ]
+  },
+  "score": {
+    "op": "mul",
+    "of": [
+      {
+        "op": "and",
+        "of": [
+          {
+            "op": "ramp",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "lo": 2,
+            "hi": 8
+          },
+          {
+            "op": "ramp",
+            "x": {
+              "f": "size_deg",
+              "obj": "a"
+            },
+            "lo": 40,
+            "hi": 25
+          }
+        ]
+      },
+      {
+        "f": "visible",
+        "obj": "a"
+      }
+    ]
+  }
+}

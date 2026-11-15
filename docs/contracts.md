@@ -35,11 +35,13 @@ The web app must run smoothly on an iPhone 13 Pro over mobile data. Every endpoi
 | `Brief` | defined | server | `search::Brief` | `brief.json` (old style), `brief_goals.json` (with goals) |
 | `Goal`, `CostFn`, `Expr`, `ObjRef`, `Object`, `Rated` | defined | core | `goal::*` | `brief_goals.json`, `search_result.json` |
 | `Spot`, `SearchResult` | defined | core | `search::{Spot, SearchResult}` | `search_result.json` |
+| `GoalLayer`, `Stage`, `Investigation` | proposed (057) | core | `search::{GoalLayer, Stage, Investigation, Verdict}` | `search_layers.json` |
 | `SceneMeta` | defined | server | `scene::SceneMeta` | `scene_meta.json` + `scene.bin` |
 | `PhotoMeta` | defined | server | `photo::PhotoMeta` | `photo_meta.json` |
 | `Building` | defined | costar | `building::{Building, BuildingList}` | `buildings.json` |
 | `ApiError` | defined | server | `error::ApiError` | `error.json` |
 | `AgentRequest`, `CallSheet` | defined | server | `agent::{AgentRequest, CallSheet}` | `agent_request.json`, `call_sheet.json` |
+| `ChatRequest`, `ChatReply` | defined | server | `agent::{ChatRequest, ChatReply, ChatMessage, ChatAsk}` | `chat_request.json`, `chat_reply.json` |
 | `MeshAt` | defined | server | none yet (built with `json!` in `crates/server/src/mesh.rs`; the fixture isn't parse-tested) | `mesh_at.json` |
 
 All fixtures are in `fixtures/`. `cargo test -p contracts` checks every fixture parses into its struct.
@@ -60,6 +62,7 @@ Server: `http://localhost:8787` (`crates/server`). All `GET` parameters are quer
 | `GET /api/buildings` | `BuildingList` | CoStar buildings near a point (who to ask for access) |
 | `GET /api/buildings/{id}` | `Building` | One building |
 | `POST /api/agent` | `CallSheet` | Free-text brief in, call sheet out (the agent) |
+| `POST /api/chat` | `ChatReply` | The brief as a chat: the agent asks up to 3 questions, then searches and returns the call sheet |
 | `GET /api/tiles/vexcel/{z}/{x}/{y}` | JPEG/PNG tile, or **204** | Vexcel aerial map tiles for MapLibre (XYZ, z0–21). 204 = no imagery for us here: show the fallback (Esri World Imagery). 400 for an impossible tile. `Cache-Control` 7 days. |
 | `GET /api/mesh/at` | `MeshAt`, or **404** | Is there a Vexcel textured 3D mesh at this point? 404 = none here: use the height-map 3D view |
 | `GET /api/mesh/near/{lat}/{lon}/{r}/tileset.json?...` | 3D Tiles tileset JSON | Vexcel's tileset through our proxy (key hidden), trimmed to `r` m (50–20000) around the point. Child URIs are relative, so they stay on the proxy |
@@ -278,7 +281,7 @@ What the filmmaker wants. `POST /api/search` body.
 | Field | Default | Meaning |
 |---|---|---|
 | `text` | `""` | The brief as typed. Only for the agent and logs; search uses the fields below. |
-| `area` | required | Where to look: centre and `radius_m` (50–800; bigger is slower). |
+| `area` | required | Where to look: centre and `radius_m` (50–800; bigger is slower). Optional `name`: a display name for people ("Downtown LA, around Grand Tower"); the search ignores it, left out when unknown. |
 | `date` | required | Local day of the shoot. |
 | `tz` | `America/Los_Angeles` | |
 | `event` | `"sunset"` | `"sunset"` or `"sunrise"`. |
@@ -330,6 +333,57 @@ What the filmmaker wants. `POST /api/search` body.
 | `spot.scores` | One `{goal, score, why}` per goal of the brief (the implicit sun goal if it had none), same order. `score` 0–1. Defaults to `[]` when reading older results. `spot.score` stays the overall rank score; `sun` and `why` stay as they were. |
 | `heat` | Coarse score map for the heatmap layer. Same grid layout as `DsmGrid` (row 0 = north, row-major). `values` are 0–1, `null` where nothing was searched. At most 40×40 = 1,600 values. |
 | `searched`, `took_ms` | How many candidate points were scored, and how long it took. |
+| `spot.investigation` | What the AI made of the spot after looking at it (photos, 3D): `{verdict, note}`, `verdict` one of `confirmed`, `caution`, `moved_up`, `moved_down`, `ruled_out`; `note` a few plain sentences. Left out if it didn't look. |
+| `layers` | One per goal, same order as `spot.scores`: each goal's score at every candidate. See [Goal layers and stages](#goal-layers-and-stages). Left out by older servers. |
+| `stages` | The funnel, in order: `{label, n, goal}`. Left out by older servers. |
+| `spacing_m` | Picked spots are at least this far apart (`max(40, 2 × heat.cell_m)` today). |
+| `objects` | The objects the goals measured from (their `ObjRef`s, resolved): `Object`s, see [Goals](#goals-and-cost-functions), so the map can mark the tower and the fountain. Left out when the goals name none. |
+
+### Goal layers and stages
+Proposed for frontend v2 (task 057; core fills them in task 059). The page re-weights goals and switches
+musts on **in the browser**, from these numbers, without a second scoring engine: the formulas
+only ever run in core. Editing a formula, adding a goal, switching a must off or "check the new spots" is a new `POST /api/search`.
+Example: `fixtures/search_layers.json` (the mock's downtown, 4 goals, 1,264 candidates, 55 KB).
+
+There is one candidate per heat cell, so a layer is exact, not a summary. The candidate is not always the cell's centre: points that object goals march to (`in_front`, `lined_up`) fold into the cell they fall in, and core keeps the best one by the searched weights. A spot sits at its candidate's real point. A weight edit in the browser rescores each cell's candidate but doesn't re-pick inside the cell, so object briefs are exact per chosen candidate; sun-only briefs (one candidate = the centre) are exact.
+
+```json
+"layers": [
+  { "goal": "close_to_tower", "weight": 0, "must": true, "heat": { "...": "HeatGrid of raw 0-1 scores" }, "gate": [17, 18, 56] },
+  { "goal": "sun_between", "weight": 1, "must": false, "heat": { "...": "HeatGrid" } }
+],
+"stages": [
+  { "label": "Points in the area", "n": 1264, "goal": null },
+  { "label": "Somewhere to stand", "n": 1213, "goal": null },
+  { "label": "Close enough to Grand Tower", "n": 1179, "goal": "close_to_tower" },
+  { "label": "The fountain in front of the tower", "n": 770, "goal": "in_front" }
+],
+"spacing_m": 40
+```
+
+| Field | Meaning |
+|---|---|
+| `layer.goal` | `Goal::name()`. |
+| `layer.weight`, `layer.must` | As searched (`weight` is `Goal::weight_or_default()`: 0 for a must with no weight). |
+| `layer.heat` | Same grid as `heat`. The goal's score 0–1 at each candidate, **raw** (not normalised). `null` where `heat` is `null`, and where an earlier gate dropped the candidate so the score was never computed: core keeps the funnel's short-circuit, which saves skyline traces. Every goal has a score at every candidate that passed all the gates. |
+| `layer.gate` | Cells (indexes into `values`) the cost function's own `must` drops, whatever `layer.must` says. It's part of the formula, so the browser can't switch it off. Usually empty, then left out. |
+| `stage.label`, `n` | Plain words, and how many candidates are left after the stage. Fixed stages first (`goal: null`): points in the area circle, then somewhere to stand (= `searched`). Then one stage per goal that gates, cheapest first, in the order core ran them, labelled with the start of its cost function's `about` (up to the first `:` or `;`), or its name. |
+| `stage.goal` | The goal whose gate it is, or `null`. |
+
+**The browser rule** (core does the same; `rebuild` in `crates/contracts/tests/fixtures.rs` is the reference):
+1. A cell is dropped if it is in any layer's `gate`, or a layer with `must` scores ≤ 0 or `null` there.
+2. Ranking goals: the layers with `weight` > 0. If there are none, every layer with weight 1/n.
+3. `raw` = Σ weight × score over the ranking goals, 0 if dropped. `heat` = raw / max raw (0 if max is 0).
+4. Spots: cells with raw > 0, best first (ties to the lower index), each at least `spacing_m` from those
+   already picked (flat distance between cell centres), up to `max_spots`. Cell centres use the `DsmGrid` formula.
+
+With the searched weights this gives back `heat` and the order of `spots` (to 1e-3 and 1e-5°).
+
+What the browser can do alone: change weights (they only touch candidates that passed every gate, which have
+every score), remove a goal that doesn't gate, and switch a must **on** (it only masks more). Switching a must
+**off**, or removing a goal that gates, needs scores that were never computed: that is a new `POST /api/search`
+with the edited goals (~1–7 s). After an edit, spots the server didn't send have no sun times or reasons yet: the
+page shows their per-goal scores from the layers and offers "check the new ones" (`POST /api/search`).
 
 ### Goals and cost functions
 Part of `Brief` (`goals`). The design and the reasons are in `docs/metrics.md` (v2). Rust: `contracts::goal`.
@@ -380,7 +434,7 @@ are in `goal::OBJECT_KINDS` (`building`, `tree`, `car`, `rooftop HVAC unit`, `sw
 
 An **object** (`Object`), as object sources hand them to core:
 `{ "id": "costar:1234567", "kind": "building", "lat": 34.0501, "lon": -118.2533, "base_m": 88.0, "top_m": 310.0, "radius_m": 30.0, "source": "costar" }`.
-Heights are on the same datum as `DsmGrid`.
+Heights are on the same datum as `DsmGrid`. Optional `name` for people when the source has one ("Grand Tower"), left out otherwise.
 
 `Rated` (`Spot.scores[]`): `{ "goal": "sun_between", "score": 0.91, "why": "Sun sets into a gap between two buildings: ..." }`.
 
@@ -480,6 +534,50 @@ From `GET /api/mesh/at`.
 | `tileset_url` | Relative to the API base. A 3D Tiles tileset (load with e.g. 3d-tiles-renderer), trimmed to 3000 m around the point. |
 | `attribution` | Must be shown on the 3D view (Vexcel licence). |
 
+### ChatRequest and ChatReply
+`POST /api/chat` is the brief as a short conversation, in front of the same agent as `/api/agent`. It's **stateless**: the
+client sends the whole conversation every turn. Each turn the agent (Claude, else the offline mock) either asks **one**
+short question with quick-reply choices, or settles the `Brief`, runs the agent's search -> call sheet steps and returns both.
+It asks at most 3 questions, never about something the text already answers, and the first choice is always its default.
+A question comes back in ~2 s; the final turn takes as long as `/api/agent`.
+
+Request (`ChatRequest`):
+```json
+{
+  "messages": [
+    { "role": "user", "text": "fountain in front of a tower at sunset" },
+    { "role": "agent", "text": "Where should I look?" },
+    { "role": "user", "text": "Downtown LA" }
+  ],
+  "area": null, "date": null, "tz": "America/Los_Angeles", "go": false
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `messages` | required | Oldest first. The first and the last are the user's (`role`: `user` or `agent`). At most 24, each at most 1000 characters. |
+| `area`, `date`, `tz` | `null`, `null`, LA | As in `AgentRequest`: a given area or date wins over the chat. |
+| `go` | `false` | "Search now": skip any remaining questions and use the defaults. Then the last message may be the agent's. |
+
+Response (`ChatReply`): exactly one of `ask` or (`brief` + `sheet`).
+```json
+{
+  "understood": ["Sunset", "Downtown LA"],
+  "ask": { "question": "Rooftop or street level?", "choices": ["Either is fine", "Rooftop", "Street level"] },
+  "brief": null, "sheet": null, "model": "mock"
+}
+```
+- `understood`: the brief so far in plain words. While asking, only what the user said; once searching, every field,
+  with the agent's own defaults ending in ` (my pick)`,
+  and goals the search can't score yet ending in ` (not checked yet)`.
+- `ask.choices`: quick replies, the default first. May be empty (free text).
+- `brief`: the brief the chat settled on, including its `goals` (see [Goals](#goals-and-cost-functions)): the sun goal
+  for the framing (`{"use": "sun_between"}`) plus object goals as data, with kinds in the user's words
+  (`{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`). `sheet`: the `CallSheet` (its
+  `brief` may be relaxed or widened from it); its `steps` start with a `chat` step.
+- `note`: one plain sentence to show with the results, e.g. what the search couldn't check yet. Left out when empty.
+- `model`: who ran this turn, model id or `"mock"`.
+
 ### AgentRequest and CallSheet
 `POST /api/agent` turns a typed brief into a call sheet. The agent (Claude when `ANTHROPIC_API_KEY` is set, else an offline mock)
 reads the text, builds a `Brief`, calls `search`, `horizon`, `buildings` and `photo` as tools, and writes the sheet.
@@ -534,4 +632,5 @@ Response (`CallSheet`):
 | `access` | Who to ask for each roof spot. `contact` is a CoStar `Contact` (or `null` if CoStar has none). `ask` is a ready-to-send one-line request. |
 | `caveats` | Honest limits that apply to this sheet. |
 | `model` | Which model wrote it (e.g. a Claude model id such as `claude-sonnet-5-5`), or `"mock"`. |
+| `search` | The `SearchResult` the spots came from (heat, layers, stages, up to `max_spots` spots), so the app can draw the map and re-weight goals after a chat. Left out by older servers. |
 | `steps` | What the agent did, in order: `{tool, summary}` with `tool` one of `read`, `plan`, `search`, `photo`, `buildings`, `sun`, `write`. Show it while/after the agent works. May be empty (added 11/14; optional when parsing). |

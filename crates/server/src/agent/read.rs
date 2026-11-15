@@ -35,7 +35,7 @@ pub fn preset_named(name: &str) -> Option<&'static Preset> {
 
 impl Preset {
     pub fn area(&self) -> Area {
-        Area { lat: self.lat, lon: self.lon, radius_m: self.radius_m }
+        Area { lat: self.lat, lon: self.lon, radius_m: self.radius_m, name: None }
     }
 }
 

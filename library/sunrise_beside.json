@@ -1,0 +1,31 @@
+{
+  "name": "sunrise_beside",
+  "about": "Sun rises beside it: within 15 deg of a. Its must (a at bearing 30-180 deg) drops points before any skyline is traced, so use it as a must",
+  "params": [
+    "a"
+  ],
+  "must": {
+    "op": "gt",
+    "x": {
+      "op": "bump",
+      "x": {
+        "f": "bearing",
+        "obj": "a"
+      },
+      "at": 105,
+      "width": 75
+    },
+    "than": {
+      "num": 0
+    }
+  },
+  "score": {
+    "op": "bump",
+    "x": {
+      "f": "sun_bearing_diff",
+      "obj": "a"
+    },
+    "at": 0,
+    "width": 15
+  }
+}

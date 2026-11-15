@@ -1,0 +1,10 @@
+{
+  "understood": ["Sunset", "Downtown LA", "Sat 15 Nov (tomorrow)"],
+  "ask": {
+    "question": "Do you want to shoot from a rooftop or from the street?",
+    "choices": ["Either is fine", "Rooftop", "Street level"]
+  },
+  "brief": null,
+  "sheet": null,
+  "model": "mock"
+}

@@ -11,6 +11,7 @@
 //! 4. **write**: title, summary, notes, access requests. Claude's words are only accepted if every clock
 //!    time in them came from the tools (`times::times_ok`); otherwise the templated text is used.
 
+pub mod chat;
 pub mod claude;
 pub mod library;
 pub mod read;
@@ -40,7 +41,7 @@ use crate::{secrets, sunpath, tz};
 use claude::Claude;
 
 pub fn routes(state: Arc<AppState>) -> Router {
-    Router::new().route("/api/agent", post(post_agent)).with_state(state)
+    Router::new().route("/api/agent", post(post_agent)).route("/api/chat", post(chat::post_chat)).with_state(state)
 }
 
 async fn post_agent(State(st): State<Arc<AppState>>, body: Result<Json<AgentRequest>, JsonRejection>) -> Result<Response, ApiErr> {
@@ -75,13 +76,18 @@ pub async fn run(st: &AppState, req: AgentRequest, now: DateTime<Utc>) -> Result
 /// can't make them call the real API).
 async fn run_with(st: &AppState, req: AgentRequest, now: DateTime<Utc>, llm: Option<Claude>) -> Result<CallSheet, ApiErr> {
     let mut log = Log::default();
+    let t0 = std::time::Instant::now();
+    // 1. read
+    let (brief, place) = read_brief(st, &req, now, llm.as_ref(), &mut log).await?;
+    eprintln!("agent: read @{} ms", t0.elapsed().as_millis());
+    sheet_for(st, brief, place, llm.as_ref(), log).await
+}
+
+/// Steps 2-4 for a brief that's already settled (by `read_brief`, or by the chat).
+async fn sheet_for(st: &AppState, brief: Brief, place: Place, llm: Option<&Claude>, mut log: Log) -> Result<CallSheet, ApiErr> {
     let clock = std::time::Instant::now();
     let mut split: Vec<(&str, u128)> = Vec::new();
     let lap = |name, split: &mut Vec<(&str, u128)>| split.push((name, clock.elapsed().as_millis()));
-
-    // 1. read
-    let (brief, place) = read_brief(st, &req, now, llm.as_ref(), &mut log).await?;
-    lap("read", &mut split);
 
     // 2. search, re-planning if nothing fits
     let (result, notes) = tools::search_step(st, brief, &place.name, llm.as_ref(), &mut log).await?;
@@ -165,8 +171,10 @@ async fn run_with(st: &AppState, req: AgentRequest, now: DateTime<Utc>, llm: Opt
 
     // 4. assemble, then write the words
     let mut sheet = assemble(&brief, &place, zone, &path, &picked, &photos, &buildings, &source, costar, notes);
+    // The whole search too (heat, goal layers, stages), so the app can draw the map and re-weight goals.
+    sheet.search = Some(result);
     let mut model = "mock".to_string();
-    if let Some(g) = &llm {
+    if let Some(g) = llm {
         match write_with_claude(g, &place, &sheet).await {
             Ok(words) => {
                 apply(&mut sheet, words);
@@ -190,40 +198,82 @@ async fn run_with(st: &AppState, req: AgentRequest, now: DateTime<Utc>, llm: Opt
 
 async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: Option<&Claude>, log: &mut Log) -> Result<(Brief, Place), ApiErr> {
     let text = req.text.trim();
-    // what the model (or the reader) thinks the place is called
-    let mut place_word = read::preset_in(text).map(|p| p.name.to_string());
-    let mut event = read::event(text);
-    let mut standing = read::standing(text);
-    let mut framing = read::framing(text);
-    let mut model_date: Option<String> = None;
+    let mut fields = Fields::read(text);
     let mut by = "the offline reader";
-
     if let Some(g) = llm {
         match claude_read(g, text, now, req).await {
             Ok(v) => {
                 by = "Claude";
-                if let Some(p) = v["place"].as_str().filter(|p| !p.trim().is_empty()) {
-                    place_word = Some(p.trim().to_string());
-                }
-                event = parse_enum(&v["event"]).unwrap_or(event);
-                standing = parse_enum(&v["standing"]).unwrap_or(standing);
-                framing = parse_enum(&v["framing"]).unwrap_or(framing);
-                model_date = v["date"].as_str().map(str::to_string);
+                fields = fields.with_model(&v);
             }
             Err(e) => log.add("read", format!("Claude couldn't read the brief ({e}); using the offline reader")),
         }
     }
+    let (brief, place) = settle(st, text, &fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, log).await?;
+    log.add("read", format!("Brief read: {} (by {by})", understood(&brief, &place).join(", ")));
+    Ok((brief, place))
+}
 
-    // where: the request's area wins, then a named place (presets, then Google Places), then the default
-    let place = match &req.area {
-        Some(a) => Place { name: "the chosen area".into(), area: a.clone(), tz: req.tz.clone() },
-        None => match place_word.as_deref() {
+/// What a reading of the brief (the offline reader's, Claude's, or the chat's) says, before the place is looked up.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fields {
+    /// The place as named ("Princeton", "Griffith Park"); None = not said.
+    pub place: Option<String>,
+    /// YYYY-MM-DD if the model gave one; checked before use.
+    pub date: Option<String>,
+    pub event: Event,
+    pub standing: Standing,
+    pub framing: Framing,
+}
+
+impl Fields {
+    /// The offline reader's reading of `text`.
+    pub fn read(text: &str) -> Fields {
+        Fields {
+            place: read::preset_in(text).map(|p| p.name.to_string()),
+            date: None,
+            event: read::event(text),
+            standing: read::standing(text),
+            framing: read::framing(text),
+        }
+    }
+
+    /// These fields overridden by a model's JSON reading (`place`, `date`, `event`, `standing`, `framing`;
+    /// empty or unknown values keep ours).
+    pub fn with_model(self, v: &serde_json::Value) -> Fields {
+        Fields {
+            place: v["place"].as_str().map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).or(self.place),
+            date: v["date"].as_str().filter(|d| !d.is_empty()).map(str::to_string).or(self.date),
+            event: parse_enum(&v["event"]).unwrap_or(self.event),
+            standing: parse_enum(&v["standing"]).unwrap_or(self.standing),
+            framing: parse_enum(&v["framing"]).unwrap_or(self.framing),
+        }
+    }
+}
+
+/// Fields -> a searchable `Brief`: the place resolved to coordinates (a given area wins, then presets, then
+/// Google Places, else Downtown LA), and the date checked (a given date wins, then the model's if it isn't in
+/// the past, then the text's, else tomorrow).
+#[allow(clippy::too_many_arguments)]
+async fn settle(
+    st: &AppState,
+    text: &str,
+    f: &Fields,
+    area: Option<&Area>,
+    date: Option<&str>,
+    tz_name: &str,
+    now: DateTime<Utc>,
+    log: &mut Log,
+) -> Result<(Brief, Place), ApiErr> {
+    let place = match area {
+        Some(a) => Place { name: "the chosen area".into(), area: a.clone(), tz: tz_name.to_string() },
+        None => match f.place.as_deref() {
             Some(w) => match read::preset_named(w) {
                 Some(p) => Place { name: p.name.into(), area: p.area(), tz: p.tz.into() },
                 None => match geocode(st, w).await {
                     Some((lat, lon)) => {
                         log.add("plan", format!("Google Places put \"{w}\" at {lat:.4}, {lon:.4}"));
-                        Place { name: w.into(), area: Area { lat, lon, radius_m: 300.0 }, tz: tz_guess(lon).into() }
+                        Place { name: w.into(), area: Area { lat, lon, radius_m: 300.0, name: None }, tz: tz_guess(lon).into() }
                     }
                     None => {
                         log.add("plan", format!("Couldn't place \"{w}\" (no Google Places key, or no match); searching Downtown LA"));
@@ -237,10 +287,10 @@ async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: 
 
     let zone = tz::parse(&place.tz).map_err(ApiErr::bad)?;
     let today = now.with_timezone(&zone).date_naive();
-    let date = match (&req.date, &model_date) {
-        (Some(d), _) => api::parse_date(d)?,
-        (None, Some(d)) if NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok_and(|d| d >= today) => NaiveDate::parse_from_str(d, "%Y-%m-%d").unwrap(),
-        _ => read::date(text, today).unwrap_or(today + Duration::days(1)),
+    let model_date = f.date.as_deref().and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).filter(|d| *d >= today);
+    let date = match date {
+        Some(d) => api::parse_date(d)?,
+        None => model_date.or_else(|| read::date(text, today)).unwrap_or(today + Duration::days(1)),
     };
 
     let brief = Brief {
@@ -248,23 +298,20 @@ async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: 
         area: place.area.clone(),
         date: date.format("%Y-%m-%d").to_string(),
         tz: place.tz.clone(),
-        event,
-        standing,
-        framing,
+        event: f.event,
+        standing: f.standing,
+        framing: f.framing,
         max_spots: 10,
         goals: Vec::new(),
         lens_deg: contracts::DEFAULT_LENS_DEG,
     };
-    log.add("read", format!(
-        "{} read: {}, {}, {}, {}, {} (by {by})",
-        "Brief",
-        event_word(event),
-        standing_words(standing),
-        framing_words(framing),
-        place.name,
-        date.format("%a %-d %B")
-    ));
     Ok((brief, place))
+}
+
+/// Pure: the brief in plain words, for the read step and the chat ("Sunset", "from a roof", ..., "Sat 15 November").
+fn understood(b: &Brief, place: &Place) -> Vec<String> {
+    let day = NaiveDate::parse_from_str(&b.date, "%Y-%m-%d").map(|d| d.format("%a %-d %B").to_string()).unwrap_or_else(|_| b.date.clone());
+    vec![event_word(b.event).into(), framing_words(b.framing).into(), standing_words(b.standing).into(), place.name.clone(), day]
 }
 
 fn default_place() -> Place {
@@ -614,7 +661,7 @@ fn assemble(
         }
     );
 
-    CallSheet { title, brief: brief.clone(), summary, timeline, spots, access, caveats, model: "mock".into(), steps: vec![] }
+    CallSheet { title, brief: brief.clone(), summary, timeline, spots, access, caveats, model: "mock".into(), steps: vec![], search: None }
 }
 
 /// "Wed Jun 03 18:10:27 UTC 2026" (Vexcel) or an ISO date -> "3 Jun 2026"; anything else as is.
@@ -737,7 +784,7 @@ mod tests {
     // ---- fake Claude: a local server that answers /v1/messages with a canned reply ----
 
     /// Serves `reply` as the Messages API answer and records the request headers and body it got.
-    async fn fake_claude(reply: serde_json::Value) -> (Claude, Arc<std::sync::Mutex<Vec<(axum::http::HeaderMap, serde_json::Value)>>>) {
+    pub(crate) async fn fake_claude(reply: serde_json::Value) -> (Claude, Arc<std::sync::Mutex<Vec<(axum::http::HeaderMap, serde_json::Value)>>>) {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let log = seen.clone();
         let app = Router::new().route(
@@ -758,7 +805,7 @@ mod tests {
     }
 
     /// A Messages API answer whose text block is `text` (after an empty thinking block, as real answers have).
-    fn answer(text: &str) -> serde_json::Value {
+    pub(crate) fn answer(text: &str) -> serde_json::Value {
         json!({"type": "message", "role": "assistant", "stop_reason": "end_turn",
                "content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": text}]})
     }
@@ -779,14 +826,14 @@ mod tests {
     }
 
     fn la_place() -> Place {
-        Place { name: "Downtown LA".into(), area: Area { lat: 34.049, lon: -118.251, radius_m: 400.0 }, tz: "America/Los_Angeles".into() }
+        Place { name: "Downtown LA".into(), area: Area { lat: 34.049, lon: -118.251, radius_m: 400.0, name: None }, tz: "America/Los_Angeles".into() }
     }
 
     /// A brief whose words point one way; the fake model answers the other way, so we can tell who read it.
     fn brief_req() -> AgentRequest {
         AgentRequest {
             text: "sunset from the street, sun between two buildings".into(),
-            area: Some(Area { lat: 34.049, lon: -118.251, radius_m: 300.0 }),
+            area: Some(Area { lat: 34.049, lon: -118.251, radius_m: 300.0, name: None }),
             date: None,
             tz: "America/Los_Angeles".into(),
         }
@@ -859,7 +906,7 @@ mod tests {
     fn agent_req(text: &str) -> AgentRequest {
         AgentRequest {
             text: text.into(),
-            area: Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0 }),
+            area: Some(Area { lat: crate::testkit::LAT, lon: crate::testkit::LON, radius_m: 300.0, name: None }),
             date: Some("2026-06-21".into()),
             tz: "America/Los_Angeles".into(),
         }
@@ -882,6 +929,11 @@ mod tests {
         assert!(sheet.caveats.iter().any(|c| c.contains("offline mock")));
         // Synthetic heights are not Vexcel, so no photo was fetched.
         assert!(sheet.spots.iter().all(|s| s.photo_url.is_none()));
+        // the search rides along, for the map and re-weighting
+        let search = sheet.search.expect("the sheet carries its search");
+        assert_eq!(search.layers.len(), 1, "the implicit sun goal");
+        assert_eq!(search.spots[0].id, sheet.spots[0].spot.id);
+        assert_eq!(search.brief, sheet.brief);
     }
 
     #[tokio::test]

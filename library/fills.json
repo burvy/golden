@@ -1,0 +1,12 @@
+{
+  "name": "fills",
+  "about": "a fills a good part of the frame (8-25 deg tall), not a speck or too big, and in view",
+  "params": ["a"],
+  "score": { "op": "mul", "of": [
+    { "op": "and", "of": [
+      { "op": "ramp", "x": { "f": "size_deg", "obj": "a" }, "lo": 2, "hi": 8 },
+      { "op": "ramp", "x": { "f": "size_deg", "obj": "a" }, "lo": 40, "hi": 25 }
+    ] },
+    { "f": "visible", "obj": "a" }
+  ] }
+}

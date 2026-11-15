@@ -14,21 +14,34 @@
 //!    This runs as a funnel over the brief's goals (`library::goals_of`, `[sun_<framing>]` when
 //!    there are none): gates (`must`) cheapest tier first, dropping a candidate at the first 0,
 //!    then the weighted sum of the goal scores. Features are computed lazily per candidate, so
-//!    the skyline is only traced if an expression needs a Skyline feature.
-//! 4. **Pick.** Normalise the scores to 0..1 and take the best, at least `min_spacing_m` apart.
-//! 5. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
+//!    the skyline is only traced if an expression needs a Skyline feature. A goal that names
+//!    objects (`objects::bind`) has a few choices of which objects it means; at each candidate
+//!    it scores its best choice that passes its gates.
+//!    Goals that compare two objects' bearings also add **marching** candidates on the line from
+//!    b through a and beyond (`objects::march`), where a stands in front of b. Each is folded
+//!    into the heat cell it falls in: a cell's candidate is the best of its centre and its
+//!    marched points, so the heatmap still has exactly one candidate per cell.
+//! 4. **Layers.** Each goal's score at every cell's candidate (`GoalLayer`), and how many
+//!    candidates each gate left (`Stage`), so the browser can re-weight goals without a second
+//!    scoring engine (docs/contracts.md#goal-layers-and-stages). A gate still short-circuits: at
+//!    a dropped candidate the goal that dropped it has 0, the gates before it keep their scores,
+//!    and the goals not reached are `null`.
+//! 5. **Pick.** Normalise the scores to 0..1 and take the best, at least `spacing` apart (between
+//!    cell centres, the rule the browser repeats).
+//! 6. **Exact pass.** For just the picked spots, run `sunblock::sun_block` on their skylines, so
 //!    the times on the cards are exact to the second, and write the reasons.
 //!
 //! The sun moves less than 0.01° across an 800 m area, so one track serves every candidate.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use contracts::{Brief, CostFn, DsmGrid, Event, HeatGrid, HorizonPoint, Rated, Spot, Standing, EARTH_R};
+use contracts::{Area, Brief, CostFn, DsmGrid, Event, Goal, GoalLayer, HeatGrid, HorizonPoint, Object, Rated, Spot, Stage, Standing, EARTH_R};
 use contracts::search::MAX_HEAT_SIDE;
 
 use crate::expr::{score_of, ExprError, Node};
-use crate::features::{self, Feature};
+use crate::features::{self, Call, Slot, Tier};
 use crate::horizon::{normalize_az, ray_max_below, Eye};
 use crate::library::{self, Ready};
+use crate::objects::{self, Choices, View};
 use crate::score::{self, Look, SkyWindow, SunTrack, TrackSample, FLANK_LOOK_DEG, GAP_SEARCH_DEG, TRACK_TOP_DEG};
 use crate::sun::{sun_position, sunset};
 use crate::sunblock::sun_block;
@@ -63,8 +76,16 @@ pub const MAX_SPOTS: u32 = 50;
 pub struct SearchOutput {
     pub spots: Vec<Spot>,
     pub heat: HeatGrid,
-    /// Candidates scored (after the standing filter).
+    /// Heat cells with a candidate scored (after the standing filter).
     pub searched: u32,
+    /// One per goal, same order as `Spot::scores`: its raw score at each cell's candidate.
+    pub layers: Vec<GoalLayer>,
+    /// The funnel: points in the area, somewhere to stand, then one per gating goal in the order run.
+    pub stages: Vec<Stage>,
+    /// Picked spots are at least this far apart (between cell centres), metres.
+    pub spacing_m: f64,
+    /// The objects the goals can mean (every binding choice), each once, in order of first use.
+    pub objects: Vec<Object>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,8 +98,11 @@ pub enum SearchError {
     AreaOffGrid,
     /// The sun doesn't rise or set that day (polar day or night).
     NoSunEvent,
-    /// A goal names an unknown cost function or has a bad expression. Every problem, with its place.
+    /// A goal names an unknown cost function, has a bad expression, or names objects that aren't
+    /// there. Every problem, with its place.
     BadGoals(Vec<ExprError>),
+    /// `brief.lens_deg` isn't between 1 and 179 degrees.
+    BadLens(f64),
 }
 
 impl std::fmt::Display for SearchError {
@@ -92,6 +116,7 @@ impl std::fmt::Display for SearchError {
                 let lines: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
                 write!(f, "bad goals: {}", lines.join("; "))
             }
+            SearchError::BadLens(l) => write!(f, "lens_deg must be between 1 and 179 degrees, got {l}"),
         }
     }
 }
@@ -104,14 +129,37 @@ pub fn skyline_need_m(area_radius_m: f64) -> f64 {
     area_radius_m + SKYLINE_RADIUS_M
 }
 
-/// Rank spots in `brief.area` for `brief`, with the seed library. `utc_offset_s` is the offset
-/// of the local day (e.g. -25200 for PDT), used for the times in the results.
-pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
-    search_with(grid, brief, &library::seeds(), utc_offset_s)
+/// What a search can draw on besides the height map and the brief.
+#[derive(Debug, Clone, Copy)]
+pub struct Inputs<'a> {
+    /// The cost functions a goal's `use` can name: the seeds plus any saved ones.
+    pub library: &'a [CostFn],
+    /// Objects in and around the area (CoStar buildings, Vexcel detections, ...), for goals
+    /// that name objects. Only needs to cover `area radius + objects::OBJECT_REACH_M`.
+    pub objects: &'a [Object],
 }
 
-/// `search`, with the cost functions the brief's `use` goals can name.
-pub fn search_with(grid: &DsmGrid, brief: &Brief, library: &[CostFn], utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
+/// Rank spots in `brief.area` for `brief`, with the seed library and no objects. `utc_offset_s`
+/// is the offset of the local day (e.g. -25200 for PDT), used for the times in the results.
+pub fn search(grid: &DsmGrid, brief: &Brief, utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
+    search_with(grid, brief, &Inputs { library: &library::seeds(), objects: &[] }, utc_offset_s)
+}
+
+/// Can `goal` run in `area` with `inputs`: a known cost function with the right args and a valid
+/// expression, and every object it names found among `inputs.objects`? The same checks
+/// `search_with` makes before it searches, so a caller can drop (or flag) a goal up front instead
+/// of failing the whole search. Errors are prefixed `goals[0]`.
+pub fn runnable(goal: &Goal, inputs: &Inputs, area: &Area) -> Result<(), Vec<ExprError>> {
+    let ready = library::ready(std::slice::from_ref(goal), inputs.library)?;
+    match bind_goals(&ready, inputs.objects, area) {
+        Ok(_) => Ok(()),
+        Err(SearchError::BadGoals(errs)) => Err(errs),
+        Err(other) => Err(vec![ExprError { at: "goals[0]".into(), msg: other.to_string() }]),
+    }
+}
+
+/// `search`, with the cost functions and objects the brief's goals can name.
+pub fn search_with(grid: &DsmGrid, brief: &Brief, inputs: &Inputs, utc_offset_s: i32) -> Result<SearchOutput, SearchError> {
     let date = NaiveDate::parse_from_str(&brief.date, "%Y-%m-%d").map_err(|_| SearchError::BadDate(brief.date.clone()))?;
     let area = &brief.area;
     if ![area.lat, area.lon, area.radius_m].iter().all(|x| x.is_finite()) || area.radius_m <= 0.0 {
@@ -120,53 +168,116 @@ pub fn search_with(grid: &DsmGrid, brief: &Brief, library: &[CostFn], utc_offset
     if !on_grid(grid, area.lat, area.lon) {
         return Err(SearchError::AreaOffGrid);
     }
-    let goals = library::ready(&library::goals_of(brief), library).map_err(SearchError::BadGoals)?;
-    let funnel = Funnel::new(&goals);
+    if !(brief.lens_deg.is_finite() && (1.0..=179.0).contains(&brief.lens_deg)) {
+        return Err(SearchError::BadLens(brief.lens_deg));
+    }
+    let goals = library::ready(&library::goals_of(brief), inputs.library).map_err(SearchError::BadGoals)?;
+    let choices = bind_goals(&goals, inputs.objects, area)?;
+    let funnel = Funnel::new(&goals, &choices);
     let track = sun_track(area.lat, area.lon, date, brief.event).ok_or(SearchError::NoSunEvent)?;
     let layout = HeatLayout::for_area(area.lat, area.lon, area.radius_m);
-    let top_m = grid_top(grid);
+    let marched = march_points(&goals, &choices, inputs.objects, area);
     let (mut sky, n_az) = empty_window(&track);
+    let scene = Scene { grid, track: &track, objects: inputs.objects, lens_deg: brief.lens_deg, top_m: grid_top(grid), n_az };
 
-    // Fast pass over every candidate.
-    let mut scored = Vec::new();
-    for cell in 0..layout.len() {
-        let Some((lat, lon)) = layout.candidate(cell, area.radius_m) else { continue };
+    // Fast pass over every candidate: the heat grid's cells, then the marched points, each
+    // folded into its cell (the better candidate stays).
+    let mut cells: Vec<Option<Scored>> = vec![None; layout.len()];
+    let mut in_area = vec![false; layout.len()];
+    for k in 0..layout.len() + marched.len() {
+        let at = if k < layout.len() { layout.candidate(k, area.radius_m) } else { Some(marched[k - layout.len()]) };
+        let Some((lat, lon)) = at else { continue };
+        let Some(cell) = (if k < layout.len() { Some(k) } else { layout.cell_at(lat, lon) }) else { continue };
+        in_area[cell] = true;
         let Some(site) = site(grid, lat, lon) else { continue };
         if !standing_ok(brief.standing, site.standing) {
             continue;
         }
-        let mut look = None;
-        let mut value = |f: Feature| {
-            feature_value(f, &site, &mut look, || {
-                fill_skyline(grid, lat, lon, site.ground_m + EYE_M, top_m, n_az, &mut sky);
-                score::look(&track, &sky)
-            })
-        };
+        let mut probe = Probe::new(&scene, lat, lon, site, Some(&mut sky));
         // A candidate dropped by a gate still counts as searched, with 0 on the heatmap.
-        let raw = funnel.rank(&mut value).unwrap_or(0.0);
-        scored.push(Scored { cell, lat, lon, site, raw });
+        let eval = funnel.evaluate(&mut |c, choice| probe.value(c, choice));
+        let s = Scored { cell, lat, lon, site, eval };
+        if cells[cell].as_ref().map_or(true, |old| s.beats(old)) {
+            cells[cell] = Some(s);
+        }
     }
+    let scored: Vec<Scored> = cells.into_iter().flatten().collect();
 
-    let best = scored.iter().map(|s| s.raw).fold(0.0, f64::max);
+    let best = scored.iter().map(|s| s.eval.raw).fold(0.0, f64::max);
     let norm = |raw: f64| if best > 0.0 { raw / best } else { 0.0 };
     let mut heat = layout.heat_grid(area.lat, area.lon);
     for s in &scored {
-        heat.values[s.cell] = Some(norm(s.raw) as f32);
+        heat.values[s.cell] = Some(norm(s.eval.raw) as f32);
     }
+    let layers = layers_of(&goals, &scored, &heat);
+    let stages = stages_of(&funnel, &scored, in_area.iter().filter(|&&x| x).count());
 
     let spacing = MIN_SPACING_M.max(2.0 * layout.cell_m);
-    let picked = pick(&scored, brief.max_spots.min(MAX_SPOTS) as usize, spacing);
+    let picked = pick(&scored, &layout, brief.max_spots.min(MAX_SPOTS) as usize, spacing);
     let spots = picked
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            fill_skyline(grid, s.lat, s.lon, s.site.ground_m + EYE_M, top_m, n_az, &mut sky);
-            let ctx = SpotContext { brief, goals: &goals, date, utc_offset_s, track: &track, sky: &sky };
-            make_spot(&ctx, s, i as u32 + 1, norm(s.raw))
+            fill_skyline(grid, s.lat, s.lon, s.site.ground_m + EYE_M, scene.top_m, n_az, &mut sky);
+            let ctx = SpotContext { brief, goals: &goals, funnel: &funnel, scene: &scene, date, utc_offset_s, sky: &sky };
+            make_spot(&ctx, s, i as u32 + 1, norm(s.eval.raw))
         })
         .collect();
 
-    Ok(SearchOutput { spots, heat, searched: scored.len() as u32 })
+    let objects = used_objects(&choices, inputs.objects);
+    Ok(SearchOutput { spots, heat, searched: scored.len() as u32, layers, stages, spacing_m: spacing, objects })
+}
+
+/// Each goal's raw score at every cell's candidate (`null` where the cell has none, or an
+/// earlier gate dropped the candidate), and the cells its own `must` drops.
+fn layers_of(goals: &[Ready], scored: &[Scored], heat: &HeatGrid) -> Vec<GoalLayer> {
+    goals
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let mut values = vec![None; heat.values.len()];
+            let mut gate = Vec::new();
+            for s in scored {
+                values[s.cell] = s.eval.values[i].map(|v| v as f32);
+                if s.eval.gate == Some(i) {
+                    gate.push(s.cell as u32);
+                }
+            }
+            GoalLayer { goal: g.name.clone(), weight: g.weight, must: g.must, heat: HeatGrid { values, ..heat.clone() }, gate }
+        })
+        .collect()
+}
+
+/// The funnel's counts: cells in the area, cells with somewhere to stand, then what's left
+/// after each gating goal, in the order the funnel runs them.
+fn stages_of(funnel: &Funnel, scored: &[Scored], in_area: usize) -> Vec<Stage> {
+    let fixed = [("Points in the area", in_area), ("Somewhere to stand", scored.len())];
+    let fixed = fixed.into_iter().map(|(label, n)| Stage { label: label.into(), n: n as u32, goal: None });
+    let gates = funnel.gated.iter().enumerate().map(|(k, &i)| {
+        let g = funnel.goals[i].goal;
+        let n = scored.iter().filter(|s| s.eval.dropped.map_or(true, |d| d > k)).count();
+        Stage { label: stage_label(g), n: n as u32, goal: Some(g.name.clone()) }
+    });
+    fixed.chain(gates).collect()
+}
+
+/// A gate's plain words: the start of the cost function's `about` (up to a colon), or its name.
+fn stage_label(g: &Ready) -> String {
+    let head = g.cost.about.split([':', ';']).next().unwrap_or("").trim();
+    let words = if head.is_empty() { g.name.as_str() } else { head };
+    let mut c = words.chars();
+    c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+}
+
+/// Every object any goal's choices name, each once, in order of first use.
+fn used_objects(choices: &[Choices], objects: &[Object]) -> Vec<Object> {
+    let mut seen: Vec<usize> = Vec::new();
+    for &i in choices.iter().flatten().flatten() {
+        if !seen.contains(&i) {
+            seen.push(i);
+        }
+    }
+    seen.into_iter().map(|i| objects[i].clone()).collect()
 }
 
 // ---- the sun's path ---------------------------------------------------------------------
@@ -272,6 +383,23 @@ impl HeatLayout {
         Some(offset_latlon(self.center_lat, self.center_lon, east, north))
     }
 
+    /// Lat/lon of the centre of heat cell `i`, inside the area or not.
+    fn centre(&self, i: usize) -> (f64, f64) {
+        let half = f64::from(self.side) / 2.0;
+        let (col, row) = ((i as u32 % self.side) as f64, (i as u32 / self.side) as f64);
+        offset_latlon(self.center_lat, self.center_lon, (col + 0.5 - half) * self.cell_m, (half - row - 0.5) * self.cell_m)
+    }
+
+    /// The heat cell holding (lat, lon), if it's on the grid.
+    fn cell_at(&self, lat: f64, lon: f64) -> Option<usize> {
+        let north = (lat - self.center_lat).to_radians() * EARTH_R;
+        let east = (lon - self.center_lon).to_radians() * EARTH_R * self.center_lat.to_radians().cos();
+        let half = f64::from(self.side) / 2.0;
+        let (col, row) = ((east / self.cell_m + half).floor(), (half - north / self.cell_m).floor());
+        let side = f64::from(self.side);
+        ((0.0..side).contains(&col) && (0.0..side).contains(&row)).then(|| (row as u32 * self.side + col as u32) as usize)
+    }
+
     fn heat_grid(&self, lat: f64, lon: f64) -> HeatGrid {
         HeatGrid {
             center_lat: lat,
@@ -368,27 +496,38 @@ fn standing_ok(wanted: Standing, got: Standing) -> bool {
 
 // ---- picking and spots ------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 struct Scored {
+    /// The heat cell it stands for.
     cell: usize,
+    /// Where it is: the cell's centre, or a marched point inside the cell.
     lat: f64,
     lon: f64,
     site: Site,
-    raw: f64,
+    eval: Eval,
 }
 
-/// The best `n` candidates with a positive score, each at least `spacing_m` from those
-/// already picked. Ties go to the earlier (more northern, then western) cell, so it's stable.
-fn pick(scored: &[Scored], n: usize, spacing_m: f64) -> Vec<Scored> {
-    let mut order: Vec<&Scored> = scored.iter().filter(|s| s.raw > 0.0).collect();
-    order.sort_by(|a, b| b.raw.total_cmp(&a.raw).then(a.cell.cmp(&b.cell)));
-    let mut picked: Vec<Scored> = Vec::with_capacity(n);
+impl Scored {
+    /// Should `self` stand for its cell instead of `old`? A higher score wins; on a tie, a
+    /// candidate no gate drops beats one that's dropped; otherwise the earlier one stays.
+    fn beats(&self, old: &Scored) -> bool {
+        self.eval.raw > old.eval.raw || (self.eval.raw == old.eval.raw && self.eval.dropped.is_none() && old.eval.dropped.is_some())
+    }
+}
+
+/// The best `n` candidates with a positive score, their cell centres at least `spacing_m` from
+/// those already picked. Ties go to the earlier (more northern, then western) cell, so it's
+/// stable. The browser repeats this from the layers (docs/contracts.md#goal-layers-and-stages).
+fn pick<'s>(scored: &'s [Scored], layout: &HeatLayout, n: usize, spacing_m: f64) -> Vec<&'s Scored> {
+    let mut order: Vec<&Scored> = scored.iter().filter(|s| s.eval.raw > 0.0).collect();
+    order.sort_by(|a, b| b.eval.raw.total_cmp(&a.eval.raw).then(a.cell.cmp(&b.cell)));
+    let mut picked: Vec<&Scored> = Vec::with_capacity(n);
     for s in order {
         if picked.len() == n {
             break;
         }
-        if picked.iter().all(|p| metres_between((p.lat, p.lon), (s.lat, s.lon)) >= spacing_m) {
-            picked.push(*s);
+        if picked.iter().all(|p| metres_between(layout.centre(p.cell), layout.centre(s.cell)) >= spacing_m) {
+            picked.push(s);
         }
     }
     picked
@@ -397,9 +536,10 @@ fn pick(scored: &[Scored], n: usize, spacing_m: f64) -> Vec<Scored> {
 struct SpotContext<'a> {
     brief: &'a Brief,
     goals: &'a [Ready],
+    funnel: &'a Funnel<'a>,
+    scene: &'a Scene<'a>,
     date: NaiveDate,
     utc_offset_s: i32,
-    track: &'a SunTrack,
     sky: &'a SkyWindow,
 }
 
@@ -410,13 +550,22 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         .map(|i| HorizonPoint { az_deg: normalize_az(sky.az_of(i)), elev_deg: sky.elev[i], dist_m: sky.dist[i] })
         .collect();
     let sun = sun_block(&points, s.lat, s.lon, ctx.date, ctx.utc_offset_s, ctx.brief.event);
-    let look = score::look(ctx.track, sky);
+    let look = score::look(ctx.scene.track, sky);
     let place = match s.site.standing {
         Standing::Roof => format!("Roof {:.0} m above the street", s.site.above_street_m),
         _ => "At street level".to_string(),
     };
-    let mut value = |f: Feature| feature_value(f, &s.site, &mut Some(look), || look);
-    let scores: Vec<Rated> = ctx.goals.iter().map(|g| rate(g, &mut value)).collect();
+    let mut probe = Probe::new(ctx.scene, s.lat, s.lon, s.site, None);
+    probe.look = Some(look);
+    let mut value = |c: Call, choice: &[usize]| probe.value(c, choice);
+    let picks = ctx.funnel.choose(&mut value);
+    let scores: Vec<Rated> = ctx
+        .goals
+        .iter()
+        .zip(&ctx.funnel.goals)
+        .zip(picks)
+        .map(|((g, run), k)| rate(g, &run.choices[k], ctx.scene.objects, &mut value))
+        .collect();
     let why = if ctx.brief.goals.is_empty() {
         score::why(ctx.brief.framing, ctx.brief.event, &look, sky, &sun, place)
     } else {
@@ -437,73 +586,299 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         why,
         building_id: None,
         scores,
+        investigation: None,
     }
 }
 
 // ---- the funnel -------------------------------------------------------------------------
 
+/// One goal in the funnel.
+struct GoalRun<'a> {
+    goal: &'a Ready,
+    /// Which objects the goal can mean (`objects::bind`); one empty choice if it names none.
+    choices: &'a Choices,
+    /// What must be above 0 for a choice to pass: the function's own `must`, and its score if
+    /// the goal is a must. Cheapest tier first. Empty: the goal never drops a candidate.
+    checks: Vec<&'a Node>,
+}
+
+/// One candidate through the funnel.
+#[derive(Debug, Clone, PartialEq)]
+struct Eval {
+    /// Per goal, its score (its best passing choice); `None` for the goals not reached before a gate dropped it.
+    values: Vec<Option<f64>>,
+    /// The ranking score (0 if dropped).
+    raw: f64,
+    /// Which gate (index into `Funnel::gated`) dropped it.
+    dropped: Option<usize>,
+    /// The goal whose cost function's own `must` dropped it (not just the goal being a must).
+    gate: Option<usize>,
+}
+
 /// The brief's goals, arranged for the candidate loop.
 struct Funnel<'a> {
-    /// Every `must`: a cost function's own gate, and the score of a goal marked `must`.
-    /// Cheapest tier first, so a candidate is dropped before anything expensive is computed.
-    gates: Vec<&'a Node>,
-    /// (score, weight) of the goals that rank. If no goal has a weight, all goals rank equally.
-    ranked: Vec<(&'a Node, f64)>,
+    goals: Vec<GoalRun<'a>>,
+    /// The goals with checks, cheapest tier first, so a candidate is dropped before anything
+    /// expensive is computed.
+    gated: Vec<usize>,
+    /// (goal, weight) of the goals that rank. If no goal has a weight, all goals rank equally.
+    ranked: Vec<(usize, f64)>,
 }
 
 impl<'a> Funnel<'a> {
-    fn new(goals: &'a [Ready]) -> Funnel<'a> {
-        let mut gates: Vec<&Node> = goals.iter().flat_map(|g| g.cost.must.iter().chain(g.must.then_some(&g.cost.score))).collect();
-        gates.sort_by_key(|n| n.tier());
-        let mut ranked: Vec<(&Node, f64)> = goals.iter().filter(|g| g.weight > 0.0).map(|g| (&g.cost.score, g.weight)).collect();
+    fn new(goals: &'a [Ready], choices: &'a [Choices]) -> Funnel<'a> {
+        let runs: Vec<GoalRun> = goals
+            .iter()
+            .zip(choices)
+            .map(|(g, choices)| {
+                let mut checks: Vec<&Node> = g.cost.must.iter().chain(g.must.then_some(&g.cost.score)).collect();
+                checks.sort_by_key(|n| n.tier());
+                GoalRun { goal: g, choices, checks }
+            })
+            .collect();
+        let mut gated: Vec<usize> = (0..runs.len()).filter(|&i| !runs[i].checks.is_empty()).collect();
+        gated.sort_by_key(|&i| runs[i].checks.iter().map(|n| n.tier()).max());
+        let mut ranked: Vec<(usize, f64)> = (0..goals.len()).filter(|&i| goals[i].weight > 0.0).map(|i| (i, goals[i].weight)).collect();
         if ranked.is_empty() {
-            ranked = goals.iter().map(|g| (&g.cost.score, 1.0 / goals.len() as f64)).collect();
+            ranked = (0..goals.len()).map(|i| (i, 1.0 / goals.len() as f64)).collect();
         }
-        Funnel { gates, ranked }
+        Funnel { goals: runs, gated, ranked }
     }
 
-    /// The candidate's ranking score, or None if a gate drops it.
-    fn rank(&self, value: &mut impl FnMut(Feature) -> f64) -> Option<f64> {
-        if self.gates.iter().any(|g| score_of(g, value) <= 0.0) {
-            return None;
+    /// Run a candidate through the gates, then score every goal. `value(call, choice)` is a
+    /// feature's number with the goal's objects as picked by `choice`. At the first gate that
+    /// drops it, that goal gets 0, the gates already passed keep their scores, and the goals not
+    /// reached yet aren't computed.
+    fn evaluate(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Eval {
+        let n = self.goals.len();
+        let mut passing = vec![u64::MAX; n];
+        for (k, &i) in self.gated.iter().enumerate() {
+            let mask = self.mask(i, value);
+            if mask == 0 {
+                let mut values = vec![None; n];
+                for &j in &self.gated[..k] {
+                    values[j] = Some(self.best(j, passing[j], value).1);
+                }
+                values[i] = Some(0.0);
+                let gate = self.fn_gate_fails(i, value).then_some(i);
+                return Eval { values, raw: 0.0, dropped: Some(k), gate };
+            }
+            passing[i] = mask;
         }
+        let values: Vec<f64> = (0..n).map(|i| self.best(i, passing[i], value).1).collect();
         // reduce, not a fold from 0.0: one goal of weight 1 gives back its score bit for bit.
-        Some(self.ranked.iter().map(|(n, w)| w * score_of(n, value)).reduce(|a, b| a + b).unwrap_or(0.0))
+        let raw = self.ranked.iter().map(|&(i, w)| w * values[i]).reduce(|a, b| a + b).unwrap_or(0.0);
+        Eval { values: values.into_iter().map(Some).collect(), raw, dropped: None, gate: None }
+    }
+
+    /// Goal `i` dropped a candidate: was it its cost function's own `must` (no choice passes it),
+    /// rather than only its score being 0 on a must goal?
+    fn fn_gate_fails(&self, i: usize, value: &mut impl FnMut(Call, &[usize]) -> f64) -> bool {
+        let run = &self.goals[i];
+        match &run.goal.cost.must {
+            None => false,
+            Some(_) if !run.goal.must => true,
+            Some(m) => run.choices.iter().all(|choice| score_of(m, &mut |c| value(c, choice)) <= 0.0),
+        }
+    }
+
+    /// For each goal, the choice of objects that scores best among those passing its checks
+    /// (or among all, if none pass): what a spot's reasons are about.
+    fn choose(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Vec<usize> {
+        let passing = self.passing(value).unwrap_or_else(|| vec![u64::MAX; self.goals.len()]);
+        (0..self.goals.len()).map(|i| self.best(i, if passing[i] == 0 { u64::MAX } else { passing[i] }, value).0).collect()
+    }
+
+    /// Per goal, a bit mask of the choices that pass its checks (all bits for an ungated goal).
+    /// None as soon as a gated goal has no passing choice.
+    fn passing(&self, value: &mut impl FnMut(Call, &[usize]) -> f64) -> Option<Vec<u64>> {
+        let mut passing = vec![u64::MAX; self.goals.len()];
+        for &i in &self.gated {
+            let mask = self.mask(i, value);
+            if mask == 0 {
+                return None;
+            }
+            passing[i] = mask;
+        }
+        Some(passing)
+    }
+
+    /// Bit mask of goal `i`'s choices that pass all its checks.
+    fn mask(&self, i: usize, value: &mut impl FnMut(Call, &[usize]) -> f64) -> u64 {
+        let run = &self.goals[i];
+        let mut mask = 0u64;
+        for (k, choice) in run.choices.iter().enumerate() {
+            if run.checks.iter().all(|n| score_of(n, &mut |c| value(c, choice)) > 0.0) {
+                mask |= 1 << k;
+            }
+        }
+        mask
+    }
+
+    /// (choice, score) of goal `i`'s best choice among those in `mask`.
+    fn best(&self, i: usize, mask: u64, value: &mut impl FnMut(Call, &[usize]) -> f64) -> (usize, f64) {
+        let run = &self.goals[i];
+        let mut best = (0, f64::NEG_INFINITY);
+        for (k, choice) in run.choices.iter().enumerate().filter(|(k, _)| mask & (1 << k) != 0) {
+            let s = score_of(&run.goal.cost.score, &mut |c| value(c, choice));
+            if s > best.1 {
+                best = (k, s);
+            }
+        }
+        best
     }
 }
 
-/// One feature for one candidate. Point features read the site; the first Skyline feature
-/// computes the candidate's `Look` with `trace`, later ones reuse it.
-fn feature_value(f: Feature, site: &Site, look: &mut Option<Look>, trace: impl FnOnce() -> Look) -> f64 {
-    if let Some(v) = features::point_value(f, site, EYE_M) {
-        return v;
+/// Each goal's object choices, or every goal whose objects aren't there.
+fn bind_goals(goals: &[Ready], objects: &[Object], area: &Area) -> Result<Vec<Choices>, SearchError> {
+    let mut out = Vec::with_capacity(goals.len());
+    let mut errors = Vec::new();
+    for (i, g) in goals.iter().enumerate() {
+        match objects::bind(&g.refs, objects, (area.lat, area.lon), area.radius_m) {
+            Ok(c) => out.push(c),
+            Err(msg) => errors.push(ExprError { at: format!("goals[{i}]"), msg }),
+        }
     }
-    let look = look.get_or_insert_with(trace);
-    features::sun_value(f, look).expect("only Point and Skyline features exist so far")
+    if errors.is_empty() {
+        Ok(out)
+    } else {
+        Err(SearchError::BadGoals(errors))
+    }
 }
 
-/// A spot's score and reason for one goal: the function's `about` plus the numbers it used.
-fn rate(goal: &Ready, value: &mut impl FnMut(Feature) -> f64) -> Rated {
-    let score = score_of(&goal.cost.score, value);
-    let mut used: Vec<Feature> = Vec::new();
-    goal.cost.score.each_feature(&mut |f| {
-        if !used.contains(&f) {
-            used.push(f);
+/// Extra candidates inside the area: for every feature in a goal that compares two objects
+/// (`bearing_diff`, `in_frame`), the line from b through a and beyond, for the goal's first
+/// `objects::MAX_MARCH_CHOICES` choices. Capped at `objects::MAX_MARCH_POINTS`.
+fn march_points(goals: &[Ready], choices: &[Choices], objects: &[Object], area: &Area) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    for (g, choices) in goals.iter().zip(choices) {
+        let mut pairs: Vec<(Slot, Slot)> = Vec::new();
+        for node in g.cost.must.iter().chain([&g.cost.score]) {
+            node.each_feature(&mut |c| {
+                if let [Some(a), Some(b)] = c.objs {
+                    if !pairs.contains(&(a, b)) {
+                        pairs.push((a, b));
+                    }
+                }
+            });
+        }
+        for choice in choices.iter().take(objects::MAX_MARCH_CHOICES) {
+            for &(a, b) in &pairs {
+                let (a, b) = (&objects[choice[usize::from(a)]], &objects[choice[usize::from(b)]]);
+                for p in objects::march(a, b) {
+                    if metres_between((area.lat, area.lon), p) > area.radius_m {
+                        continue;
+                    }
+                    out.push(p);
+                    if out.len() == objects::MAX_MARCH_POINTS {
+                        return out;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// What every candidate's features are computed from.
+struct Scene<'a> {
+    grid: &'a DsmGrid,
+    track: &'a SunTrack,
+    objects: &'a [Object],
+    lens_deg: f64,
+    /// Highest height in the grid (lets skyline rays stop early).
+    top_m: f64,
+    /// Azimuths in the skyline window.
+    n_az: usize,
+}
+
+/// One candidate's features, computed when first asked for and kept: the `Look` (one skyline
+/// trace) for Skyline features, one line-of-sight march per object for `visible`.
+struct Probe<'a> {
+    scene: &'a Scene<'a>,
+    site: Site,
+    view: View,
+    look: Option<Look>,
+    /// Where to trace the skyline. None if `look` is already set.
+    sky: Option<&'a mut SkyWindow>,
+    /// (object index, visible) so far.
+    seen: Vec<(usize, f64)>,
+}
+
+impl<'a> Probe<'a> {
+    fn new(scene: &'a Scene<'a>, lat: f64, lon: f64, site: Site, sky: Option<&'a mut SkyWindow>) -> Probe<'a> {
+        let view = View { lat, lon, eye_m: site.ground_m + EYE_M, lens_deg: scene.lens_deg };
+        Probe { scene, site, view, look: None, sky, seen: Vec::new() }
+    }
+
+    /// One feature, with the goal's objects as picked by `choice` (slot -> object index).
+    fn value(&mut self, c: Call, choice: &[usize]) -> f64 {
+        let objects = self.scene.objects;
+        let index = |k: usize| c.objs[k].map(|s| choice[usize::from(s)]);
+        let objs = [index(0).map(|i| &objects[i]), index(1).map(|i| &objects[i])];
+        if let Some(v) = features::point_value(c.f, &self.site, &self.view, objs) {
+            return v;
+        }
+        match c.f.tier() {
+            Tier::Point => unreachable!("every Point feature has a point_value"),
+            Tier::Ray => {
+                let Some(i) = index(0) else { return f64::NAN };
+                if let Some(&(_, v)) = self.seen.iter().find(|(j, _)| *j == i) {
+                    return v;
+                }
+                let v = features::ray_value(c.f, self.scene.grid, &self.view, Some(&objects[i])).expect("Ray feature");
+                self.seen.push((i, v));
+                v
+            }
+            Tier::Skyline => {
+                let (scene, view) = (self.scene, self.view);
+                let sky = &mut self.sky;
+                let look = self.look.get_or_insert_with(|| {
+                    let sky = sky.as_deref_mut().expect("a probe without a skyline buffer has its look set");
+                    fill_skyline(scene.grid, view.lat, view.lon, view.eye_m, scene.top_m, scene.n_az, sky);
+                    score::look(scene.track, sky)
+                });
+                features::sun_value(c.f, look, scene.track, &view, objs[0]).expect("Skyline feature")
+            }
+        }
+    }
+}
+
+/// A spot's score and reason for one goal, for the objects in `choice`: the function's `about`,
+/// the numbers it used, and which objects it means.
+fn rate(goal: &Ready, choice: &[usize], objects: &[Object], value: &mut impl FnMut(Call, &[usize]) -> f64) -> Rated {
+    let score = score_of(&goal.cost.score, &mut |c| value(c, choice));
+    let mut used: Vec<Call> = Vec::new();
+    goal.cost.score.each_feature(&mut |c| {
+        if !used.contains(&c) {
+            used.push(c);
         }
     });
     let numbers: Vec<String> = used
         .iter()
         .take(4)
-        .map(|&f| {
-            let v = value(f);
+        .map(|&c| {
+            let v = value(c, choice);
+            let name = goal.cost.call_text(c);
             if v.abs() <= 1.0 {
-                format!("{} {v:.2}", f.name())
+                format!("{name} {v:.2}")
             } else {
-                format!("{} {v:.1}", f.name())
+                format!("{name} {v:.1}")
             }
         })
         .collect();
-    let why = if numbers.is_empty() { goal.cost.about.clone() } else { format!("{} ({})", goal.cost.about, numbers.join(", ")) };
+    let mut why = if numbers.is_empty() { goal.cost.about.clone() } else { format!("{} ({})", goal.cost.about, numbers.join(", ")) };
+    // Which objects it used, unless the reason already says (an object named by id).
+    let names: Vec<String> = choice
+        .iter()
+        .enumerate()
+        .map(|(s, &o)| (goal.cost.label(s as Slot), &objects[o].id))
+        .filter(|(label, id)| label != *id)
+        .map(|(label, id)| format!("{label}: {id}"))
+        .collect();
+    if !names.is_empty() {
+        why = format!("{why} [{}]", names.join(", "));
+    }
     Rated { goal: goal.name.clone(), score: (score * 1000.0).round() / 1000.0, why }
 }
 
@@ -562,7 +937,7 @@ mod tests {
     fn brief(radius_m: f64, standing: Standing, framing: Framing) -> Brief {
         Brief {
             text: String::new(),
-            area: Area { lat: LAT, lon: LON, radius_m },
+            area: Area { lat: LAT, lon: LON, radius_m, name: None },
             date: "2026-06-21".into(),
             tz: "America/Los_Angeles".into(),
             event: Event::Sunset,
@@ -719,7 +1094,7 @@ mod tests {
         let g = grid(100, |_, _| None);
         let b = Brief { date: "21/06/2026".into(), ..brief(50.0, Standing::Any, Framing::Clear) };
         assert!(matches!(search(&g, &b, PDT), Err(SearchError::BadDate(_))));
-        let b = Brief { area: Area { lat: 40.0, lon: LON, radius_m: 50.0 }, ..brief(50.0, Standing::Any, Framing::Clear) };
+        let b = Brief { area: Area { lat: 40.0, lon: LON, radius_m: 50.0, name: None }, ..brief(50.0, Standing::Any, Framing::Clear) };
         assert_eq!(search(&g, &b, PDT), Err(SearchError::AreaOffGrid));
         assert_eq!(search(&g, &brief(0.0, Standing::Any, Framing::Clear), PDT), Err(SearchError::BadArea));
     }
@@ -825,18 +1200,217 @@ mod tests {
         )
         .unwrap();
         let ready = crate::library::ready(&goals, &crate::library::seeds()).unwrap();
-        let funnel = Funnel::new(&ready);
-        assert_eq!(funnel.gates.iter().map(|n| n.tier()).collect::<Vec<_>>(), [crate::features::Tier::Point, crate::features::Tier::Skyline]);
+        let choices = vec![vec![vec![]]; ready.len()];
+        let funnel = Funnel::new(&ready, &choices);
+        let tiers: Vec<Tier> = funnel.gated.iter().map(|&i| funnel.goals[i].goal.cost.tier()).collect();
+        assert_eq!(tiers, [Tier::Point, Tier::Skyline]);
         let ground = Site { ground_m: 0.0, standing: Standing::Ground, above_street_m: 0.0 };
-        let mut traced = 0;
-        let mut look = None;
-        let rank = funnel.rank(&mut |f| {
-            feature_value(f, &ground, &mut look, || {
-                traced += 1;
-                panic!("a ground spot fails the roof gate before any skyline is traced")
-            })
+        let g = grid(10, |_, _| None);
+        let track = SunTrack { samples: Vec::new(), step_s: TRACK_STEP_S };
+        let scene = Scene { grid: &g, track: &track, objects: &[], lens_deg: 60.0, top_m: 0.0, n_az: 0 };
+        // No skyline buffer: tracing one would panic. A ground spot fails the roof gate first.
+        let mut probe = Probe::new(&scene, LAT, LON, ground, None);
+        let e = funnel.evaluate(&mut |c, ch| probe.value(c, ch));
+        // dropped at the first gate (the roof, goal 1), by the goal being a must, not its function's own gate
+        assert_eq!(e, Eval { values: vec![None, Some(0.0)], raw: 0.0, dropped: Some(0), gate: None });
+    }
+
+    // ---- objects ----
+
+    /// A 30 m square, 60 m tower 200 m north and a 5 m kiosk ("fountain") 100 m north, plus
+    /// the objects for them. Optionally a 15 m wall across x = 40..80, y = -60 (hides the tower
+    /// from part of the south-east).
+    fn plaza(wall: bool) -> (DsmGrid, Vec<Object>) {
+        let g = grid(800, |e, n| {
+            if e.abs() < 15.0 && (n - 200.0).abs() < 15.0 {
+                Some(60.0)
+            } else if e.abs() < 3.0 && (n - 100.0).abs() < 3.0 {
+                Some(5.0)
+            } else if wall && (40.0..80.0).contains(&e) && (n + 60.0).abs() < 1.0 {
+                Some(15.0)
+            } else {
+                None
+            }
         });
-        assert_eq!((rank, traced), (None, 0));
+        let at = |id: &str, kind: &str, north: f64, top: f64, r: f64| {
+            let (lat, lon) = objects::offset((LAT, LON), 0.0, north);
+            Object { id: id.into(), kind: kind.into(), lat, lon, base_m: 0.0, top_m: top, radius_m: r, source: "test".into(), name: None }
+        };
+        (g, vec![at("costar:1", "building", 200.0, 60.0, 15.0), at("vexcel:fountain:1", "fountain", 100.0, 5.0, 3.0)])
+    }
+
+    fn object_search(g: &DsmGrid, objs: &[Object], radius_m: f64, goals: &str) -> Result<SearchOutput, SearchError> {
+        let b = with_goals(brief(radius_m, Standing::Ground, Framing::Clear), goals);
+        search_with(g, &b, &Inputs { library: &crate::library::seeds(), objects: objs }, PDT)
+    }
+
+    fn view_of(s: &Spot) -> View {
+        View { lat: s.lat, lon: s.lon, eye_m: s.eye_m, lens_deg: 60.0 }
+    }
+
+    #[test]
+    fn in_front_puts_the_fountain_before_the_tower() {
+        let (g, objs) = plaza(false);
+        let goals = r#"[{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"id":"costar:1"}},"must":true}]"#;
+        let out = object_search(&g, &objs, 300.0, goals).unwrap();
+        assert_eq!(out.spots.len(), 10);
+        for s in &out.spots {
+            let v = view_of(s);
+            assert!(objects::dist(&v, &objs[1]) < 0.8 * objects::dist(&v, &objs[0]) + 1.0, "{}: fountain clearly nearer", s.id);
+            assert!(objects::in_frame(&v, &objs[1], &objs[0]) > 0.0, "{}: both in frame", s.id);
+            assert!(objects::bearing(&v, &objs[0]) < 60.0 || objects::bearing(&v, &objs[0]) > 300.0, "{}: looking north", s.id);
+        }
+        let top = &out.spots[0];
+        assert_eq!(top.scores.len(), 1);
+        assert!(top.scores[0].why.starts_with("a in the foreground of b"), "{}", top.scores[0].why);
+        assert!(top.scores[0].why.contains("visible(b)"), "{}", top.scores[0].why);
+        assert!(top.scores[0].why.ends_with("[a: vexcel:fountain:1, b: costar:1]"), "{}", top.scores[0].why);
+        // Marching added candidates off the cell centres; they fold into the heat grid's cells.
+        let plain = search(&g, &brief(300.0, Standing::Ground, Framing::Clear), PDT).unwrap();
+        assert!(out.searched >= plain.searched, "{} vs {}", out.searched, plain.searched);
+        assert_eq!(out.heat.values.len(), plain.heat.values.len());
+    }
+
+    #[test]
+    fn layers_hold_each_goal_and_gates_short_circuit() {
+        let (g, objs) = plaza(false);
+        // in_front's own `must` gates (whatever the goal says); the sun ranks.
+        let goals = r#"[{"use":"sun_clear"},{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"id":"costar:1"}},"weight":0.5}]"#;
+        let out = object_search(&g, &objs, 300.0, goals).unwrap();
+        let [sun, front] = &out.layers[..] else { panic!("{} layers", out.layers.len()) };
+        assert_eq!((sun.goal.as_str(), sun.weight, sun.must), ("sun_clear", 1.0, false));
+        assert_eq!((front.goal.as_str(), front.weight, front.must), ("in_front", 0.5, false));
+        assert!(sun.gate.is_empty() && !front.gate.is_empty());
+        let searched = out.heat.values.iter().filter(|v| v.is_some()).count();
+        assert_eq!(searched as u32, out.searched);
+        for i in 0..out.heat.values.len() {
+            let (h, s, f) = (out.heat.values[i], sun.heat.values[i], front.heat.values[i]);
+            if front.gate.contains(&(i as u32)) {
+                // dropped by in_front's gate: 0 there, the sun never ran, the heat is 0
+                assert_eq!((h, s, f), (Some(0.0), None, Some(0.0)), "cell {i}");
+            } else {
+                assert_eq!((s.is_some(), f.is_some()), (h.is_some(), h.is_some()), "cell {i}");
+            }
+        }
+        let labels: Vec<(&str, u32, Option<&str>)> = out.stages.iter().map(|s| (s.label.as_str(), s.n, s.goal.as_deref())).collect();
+        let kept = out.searched - front.gate.len() as u32;
+        assert_eq!(labels[1..], [("Somewhere to stand", out.searched, None), ("A in the foreground of b", kept, Some("in_front"))]);
+        assert_eq!(labels[0].0, "Points in the area");
+        assert!(labels[0].1 >= out.searched);
+        assert_eq!(out.objects.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["vexcel:fountain:1", "costar:1"]);
+        assert_eq!(out.spacing_m, MIN_SPACING_M.max(2.0 * out.heat.cell_m));
+    }
+
+    #[test]
+    fn cell_at_finds_the_cell_of_its_centre() {
+        let layout = HeatLayout::for_area(LAT, LON, 300.0);
+        for i in [0, 1, 39, 40, 777, layout.len() - 1] {
+            let (lat, lon) = layout.centre(i);
+            assert_eq!(layout.cell_at(lat, lon), Some(i));
+        }
+        let (lat, lon) = layout.centre(0);
+        assert_eq!(layout.cell_at(lat + 0.01, lon), None, "north of the grid");
+    }
+
+    #[test]
+    fn lined_up_spots_sit_on_the_line_from_the_tower_through_the_fountain() {
+        let (g, objs) = plaza(false);
+        let goals = r#"[{"use":"lined_up","args":{"a":{"kind":"fountain"},"b":{"kind":"building"}},"must":true}]"#;
+        let out = object_search(&g, &objs, 300.0, goals).unwrap();
+        assert!(!out.spots.is_empty());
+        for s in &out.spots {
+            let v = view_of(s);
+            assert!(objects::bearing_diff(&v, &objs[1], &objs[0]).abs() < 10.0, "{}", s.id);
+            let (e, n) = en(s);
+            assert!(n < 100.0 - 3.0 && e.abs() < 60.0, "south of the fountain, near the line: {e:.0},{n:.0}");
+        }
+        let (e, _) = en(&out.spots[0]);
+        assert!(e.abs() < 8.0, "the best one is right on the line (a marched point): {e}");
+    }
+
+    #[test]
+    fn a_visibility_gate_drops_spots_behind_the_wall() {
+        let (g, objs) = plaza(true);
+        let goals = r#"[{"use":"fills","args":{"a":{"id":"costar:1"}}},
+            {"def":{"name":"tower_in_view","about":"The tower is mostly in view",
+                    "score":{"op":"gt","x":{"f":"visible","obj":{"id":"costar:1"}},"than":{"num":0.5}}},"must":true}]"#;
+        let out = object_search(&g, &objs, 300.0, goals).unwrap();
+        assert!(!out.spots.is_empty());
+        for s in &out.spots {
+            let v = view_of(s);
+            // Spot positions are rounded to ~1 m, so allow one step (0.2) below the gate.
+            assert!(objects::visible(&g, &v, &objs[0]) >= 0.4, "{}", s.id);
+            assert_eq!(s.scores[1].score, 1.0);
+            assert_eq!(s.scores[1].why, "The tower is mostly in view (visible(costar:1) 1.00)", "an object by id isn't named twice");
+        }
+        // Right behind the wall (60, -80) the tower is hidden: that heat cell is 0.
+        let h = &out.heat;
+        let (c, r) = (((f64::from(h.width) / 2.0) + 60.0 / h.cell_m) as usize, ((f64::from(h.width) / 2.0) + 80.0 / h.cell_m) as usize);
+        assert_eq!(h.values[r * h.width as usize + c], Some(0.0));
+    }
+
+    #[test]
+    fn kind_near_picks_the_object_near_the_other() {
+        // Two fountains: one by the tower, one 250 m south. The area is around the southern one.
+        // Without a constraint each spot names whichever fountain works best from there.
+        let (g, mut objs) = plaza(false);
+        let (lat, lon) = objects::offset((LAT, LON), 0.0, -250.0);
+        objs.push(Object { id: "vexcel:fountain:2".into(), lat, lon, ..objs[1].clone() });
+        let run = |goals: &str| {
+            let mut b = with_goals(brief(100.0, Standing::Ground, Framing::Clear), goals);
+            b.area = Area { lat, lon, radius_m: 100.0, name: None };
+            search_with(&g, &b, &Inputs { library: &crate::library::seeds(), objects: &objs }, PDT).unwrap()
+        };
+        let out = run(r#"[{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"id":"costar:1"}}}]"#);
+        assert!(!out.spots.is_empty());
+        let named = |s: &Spot| if s.scores[0].why.contains("a: vexcel:fountain:2,") { &objs[2] } else { &objs[1] };
+        for s in &out.spots {
+            let v = view_of(s);
+            assert!(objects::dist(&v, named(s)) < 0.8 * objects::dist(&v, &objs[0]) + 1.0, "{}: the named fountain is in front", s.id);
+        }
+        // `within_m` alone: within 50 m of the area's centre, so the southern one.
+        let out = run(r#"[{"use":"in_front","args":{"a":{"kind":"fountain","within_m":50},"b":{"id":"costar:1"}}}]"#);
+        assert!(!out.spots.is_empty());
+        assert!(out.spots.iter().all(|s| s.scores[0].why.contains("a: vexcel:fountain:2,")), "{:?}", out.spots[0].scores);
+        // `near` the tower: the northern one.
+        let out = run(r#"[{"use":"in_front","args":{"a":{"kind":"fountain","near":{"id":"costar:1"},"within_m":150},"b":{"id":"costar:1"}}}]"#);
+        assert!(!out.spots.is_empty());
+        assert!(out.spots.iter().all(|s| s.scores[0].why.contains("a: vexcel:fountain:1,")), "{:?}", out.spots[0].scores);
+    }
+
+    #[test]
+    fn missing_objects_and_bad_lens_are_errors() {
+        let (g, objs) = plaza(false);
+        let goals = r#"[{"use":"sun_clear"},{"use":"fills","args":{"a":{"kind":"swimming pool"}}},{"use":"fills","args":{"a":{"id":"costar:2"}}}]"#;
+        match object_search(&g, &objs, 300.0, goals) {
+            Err(SearchError::BadGoals(errs)) => {
+                let text: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                assert_eq!(text.len(), 2, "{text:?}");
+                assert!(text[0].starts_with("goals[1]: no object of kind \"swimming pool\"") && text[0].contains("building x1, fountain x1"), "{text:?}");
+                assert!(text[1].starts_with("goals[2]: no object with id \"costar:2\""), "{text:?}");
+            }
+            other => panic!("expected BadGoals, got {other:?}"),
+        }
+        let b = Brief { lens_deg: 0.0, ..brief(100.0, Standing::Any, Framing::Clear) };
+        assert_eq!(search(&g, &b, PDT), Err(SearchError::BadLens(0.0)));
+    }
+
+    #[test]
+    fn runnable_checks_the_library_and_the_objects() {
+        let (_, objs) = plaza(false);
+        let lib = crate::library::seeds();
+        let area = Area { lat: LAT, lon: LON, radius_m: 300.0, name: None };
+        let goal = |s: &str| -> Goal { serde_json::from_str(s).unwrap() };
+        let none: [Object; 0] = [];
+        let with = |objects| Inputs { library: &lib, objects };
+        let front = goal(r#"{"use":"in_front","args":{"a":{"kind":"fountain"},"b":{"kind":"building"}}}"#);
+        assert_eq!(runnable(&goal(r#"{"use":"sun_clear"}"#), &with(&none[..]), &area), Ok(()));
+        assert_eq!(runnable(&front, &with(&objs[..]), &area), Ok(()));
+        // a seed, but no fountain known here: not runnable, and the reason says so
+        let errs = runnable(&front, &with(&none[..]), &area).unwrap_err();
+        assert!(errs[0].to_string().starts_with("goals[0]: no object of kind \"fountain\""), "{errs:?}");
+        let errs = runnable(&goal(r#"{"use":"golden_retriever"}"#), &with(&objs[..]), &area).unwrap_err();
+        assert!(errs[0].to_string().starts_with("goals[0].use: no cost function"), "{errs:?}");
     }
 
     #[test]

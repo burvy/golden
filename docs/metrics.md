@@ -101,9 +101,11 @@ its features, and the funnel runs cheap expressions first.
 | Feature | Tier | Meaning |
 |---|---|---|
 | `ground_m`, `eye_m`, `roof` (0/1) | Point | the standpoint |
-| `dist(obj)`, `bearing(obj)`, `bearing_diff(a, b)` | Point | geometry to objects (deg, m) |
+| `lens_deg` | Point | the brief's lens angle (built in 052) |
+| `dist(obj)`, `bearing(obj)`, `bearing_diff(a, b)` | Point | geometry to objects (deg, m); `bearing_diff` is signed, > 0 = a right of b |
 | `size_deg(obj)` | Point | angular height of an object |
-| `visible(obj)` | Ray | 0..1, ray march through the height map to base/mid/top |
+| `in_frame(a, b)` | Point | 0..1: 1 within half the lens angle, 0 a whole lens angle apart (built in 052) |
+| `visible(obj)` | Ray | 0..1, one ray march through the height map to 5 heights on the object's near side |
 | `sun_clear`, `sun_between`, `sun_behind` | Skyline | today's sun scores, 0..1, maths unchanged |
 | `sun_visible_min`, `sun_hidden_elev`, `gap_width_deg` | Skyline | today's `Look` numbers |
 | `sun_bearing_diff(obj)` | Skyline | sun azimuth at sunset minus object bearing |
@@ -111,6 +113,20 @@ its features, and the funnel runs cheap expressions first.
 `obj` is an object reference: `{"id": "costar:123"}`, or `{"kind": "tree", "near": "<other ref>",
 "within_m": 300}`, meaning the best-scoring object of that kind (which is how "pairs within range"
 works).
+
+How core resolves them (052, `core::objects::bind`): each goal turns its references into up to 64
+**choices** of concrete objects, nearest the area's centre first, and at each candidate scores its
+best choice that passes its gates (the spot's reason names the objects it used). `kind` matches
+any object of that label within the area radius + 1500 m; `within_m` without `near` is measured from
+the area's centre; `near` without `within_m` means 300 m. A `near` target written the same as one
+of the goal's own references is that object (`a = {"kind":"tree","near":{"kind":"building"}}, b =
+{"kind":"building"}` is a tree near b). Different references are always different objects. A
+reference that finds nothing is a goal error that says what the area does have.
+
+**Marching (052):** every feature comparing two objects (`bearing_diff(a, b)`, `in_frame(a, b)`) in a
+goal adds candidates on the line from b through a and beyond (plus 2° either side), out to where a
+looks 1° tall, inside the area, for the goal's first 8 choices, at most 800 per search. They rank
+like grid candidates but aren't on the heatmap.
 
 ### Expression language (JSON, small on purpose)
 ```jsonc
@@ -133,7 +149,9 @@ A **cost function** (library entry):
 ```
 Built-in entries (`sun_clear`, `sun_between`, `sun_behind`, `in_front`, `lined_up`, `between`,
 `beside`, `fills`) ship as seed JSON and are written in the same language, so the agent can read
-them as examples and copy them.
+them as examples and copy them. Params are object refs only, so `beside` takes no `side` (it
+accepts either; the agent can write a one-sided copy with the sign of `bearing_diff`) and `fills`
+uses fixed angles (8-25° tall).
 
 ### Goals in the brief (contract)
 ```jsonc

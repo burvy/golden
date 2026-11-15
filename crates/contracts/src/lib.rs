@@ -16,7 +16,7 @@ pub mod scene;
 pub mod search;
 pub mod sun;
 
-pub use agent::{Access, AgentRequest, AgentStep, CallSheet, SheetSpot, SpotRole, TimelineItem};
+pub use agent::{Access, AgentRequest, AgentStep, CallSheet, ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, SheetSpot, SpotRole, TimelineItem};
 pub use building::{Building, BuildingList, Contact, ContactRole, Matterport};
 pub use dsm::{DsmFileError, DsmGrid, DsmMeta, DsmSource, EARTH_R, NODATA};
 pub use error::ApiError;
@@ -24,5 +24,5 @@ pub use goal::{CmpOp, CostFn, Expr, Goal, GoalFn, ListOp, ObjArg, ObjRef, Object
 pub use horizon::{HorizonPoint, HorizonProfile, Observer, SunBlock};
 pub use photo::{PhotoKind, PhotoMeta};
 pub use scene::{SceneMeta, SceneRing};
-pub use search::{Area, Brief, Event, Framing, HeatGrid, SearchResult, Spot, Standing};
+pub use search::{Area, Brief, Event, Framing, GoalLayer, HeatGrid, Investigation, SearchResult, Spot, Stage, Standing, Verdict};
 pub use sun::{GoldenHour, SunEvent, SunPath, SunPoint, TimeRange};
