@@ -258,6 +258,10 @@ fn scenarios() -> Vec<Scenario> {
         }),
         plain("skyline-glow", "the setting sun behind you lights both tallest buildings, both in one frame and in view (a must)", Standing::Any, glow),
         sunrise(plain("sunrise-skyline-glow", "the rising sun behind you lights both tallest buildings, both in one frame and in view (a must)", Standing::Any, glow)),
+        // ---- round 6: how wide may "behind the tower" and "lit" be? (shot-class tuning) ----
+        plain("silhouette-w10", "as silhouette, but the sun within 10 deg of the tower", Standing::Any, |c| silhouette_w(c, 10.0)),
+        plain("silhouette-w20", "as silhouette, but the sun within 20 deg of the tower", Standing::Any, |c| silhouette_w(c, 20.0)),
+        plain("lit-tower-w20", "as lit-tower, but the sun within 20 deg of straight behind you", Standing::Any, |c| lit_tower_w(c, 20.0)),
         plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
             r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
         }),
@@ -277,6 +281,20 @@ fn glow(c: &Ctx) -> String {
         t = c.tower,
         u = c.tower2
     )
+}
+
+/// The sun drops behind something within `w` deg of the tower (a must).
+fn silhouette_w(c: &Ctx, w: f64) -> String {
+    format!(
+        r#"[{{"def":{{"name":"sun_behind_tower","about":"Sun drops behind the tower",
+            "score":{{"op":"mul","of":[{{"op":"bump","x":{{"f":"sun_bearing_diff","obj":{t}}},"at":0,"width":{w}}},{{"f":"sun_behind"}}]}}}},"must":true,"weight":1}}]"#,
+        t = c.tower
+    )
+}
+
+/// lit_tower with the sun within `w` deg of straight behind you.
+fn lit_tower_w(c: &Ctx, w: f64) -> String {
+    lit_tower(c).replace(r#""at":180,"width":30"#, &format!(r#""at":180,"width":{w}"#))
 }
 
 /// The same scenario on the second tower.
@@ -411,7 +429,7 @@ fn gates() -> Vec<Gate> {
     };
     let mut out = vec![
         entry("tower_framable", &["tower-and-sunset", "soft-tower", "tower-framing-sunset"]),
-        entry("tower_toward_sunset", &["sun-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline"]),
+        entry("tower_toward_sunset", &["sun-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline", "silhouette-w10"]),
         entry("tower_toward_sunrise", &["sunrise-by-tower", "sunrise-silhouette"]),
         entry("tower_framed_toward_sunset", &["tower-framing-sunset"]),
         Gate { replaces: Some(0), ..entry("sunset_beside", &["sun-by-tower", "sun-by-tower2"]) },
