@@ -411,6 +411,7 @@ async fn search_with_replan(st: &AppState, mut brief: Brief, place: &str, log: &
             let msg = format!("Nothing fits \"{}\" {}; relaxing to any open view", framing_words(brief.framing), standing_words(brief.standing));
             log.add("plan", msg.clone());
             notes.push(msg);
+            relax_sun_goal(&mut brief.goals, brief.framing);
             brief.framing = Framing::Clear;
             brief.standing = Standing::Any;
         } else {
@@ -422,6 +423,17 @@ async fn search_with_replan(st: &AppState, mut brief: Brief, place: &str, log: &
         }
     }
     Err(ApiErr::unprocessable("no spots found, even after relaxing the brief and widening the area"))
+}
+
+/// Pure: relaxing the framing to clear also relaxes the sun goal, but only when goals[0] is exactly the
+/// framing's own `sun_<framing>` (what the chat sets): a goal the user or the agent chose (open_horizon, a weight,
+/// a must, an inline function) is theirs and stays. Without this, a chat brief's relax step changed nothing.
+fn relax_sun_goal(goals: &mut [contracts::Goal], old: Framing) {
+    if let Some(g) = goals.first_mut() {
+        if *g == contracts::Goal::using(golden_core::library::sun_goal_name(old)) {
+            *g = contracts::Goal::using(golden_core::library::sun_goal_name(Framing::Clear));
+        }
+    }
 }
 
 // ---- 3/4. assemble the sheet --------------------------------------------------------------------
@@ -767,6 +779,34 @@ fn apply(sheet: &mut CallSheet, w: Words) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relaxing_swaps_only_the_framings_own_sun_goal() {
+        use contracts::Goal;
+        let names = |g: &[Goal]| g.iter().map(|x| x.name().to_string()).collect::<Vec<_>>();
+        let mut chat = vec![Goal::using("sun_between"), Goal::using("in_front")];
+        relax_sun_goal(&mut chat, Framing::Between);
+        assert_eq!(names(&chat), ["sun_clear", "in_front"]);
+        assert_eq!(chat[1], Goal::using("in_front"), "later goals untouched");
+
+        let mut behind = vec![Goal::using("sun_behind")];
+        relax_sun_goal(&mut behind, Framing::Behind);
+        assert_eq!(behind, [Goal::using("sun_clear")]);
+
+        // Not the framing's own goal: a lab shot, another framing's goal, a weighted or must goal, no goals.
+        let mut must = Goal::using("sun_between");
+        must.must = true;
+        let mut weighted = Goal::using("sun_between");
+        weighted.weight = Some(0.5);
+        for g in [Goal::using("sun_wide_gap"), Goal::using("sun_behind"), must, weighted] {
+            let mut goals = vec![g.clone()];
+            relax_sun_goal(&mut goals, Framing::Between);
+            assert_eq!(goals, [g]);
+        }
+        let mut none: Vec<Goal> = Vec::new();
+        relax_sun_goal(&mut none, Framing::Between);
+        assert!(none.is_empty());
+    }
 
     #[test]
     fn arrival_is_before_golden_hour_and_the_shot() {
