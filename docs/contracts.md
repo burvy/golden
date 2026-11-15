@@ -367,7 +367,7 @@ There is one candidate per heat cell, so a layer is exact, not a summary. The ca
 | `layer.weight`, `layer.must` | As searched (`weight` is `Goal::weight_or_default()`: 0 for a must with no weight). |
 | `layer.heat` | Same grid as `heat`. The goal's score 0–1 at each candidate, **raw** (not normalised). `null` where `heat` is `null`, and where an earlier gate dropped the candidate so the score was never computed: core keeps the funnel's short-circuit, which saves skyline traces. Every goal has a score at every candidate that passed all the gates. |
 | `layer.gate` | Cells (indexes into `values`) the cost function's own `must` drops, whatever `layer.must` says. It's part of the formula, so the browser can't switch it off. Usually empty, then left out. |
-| `stage.label`, `n` | Plain words, and how many candidates are left after the stage. Fixed stages first (`goal: null`): points in the area circle, then somewhere to stand (= `searched`). Then one stage per goal that gates, cheapest first, in the order core ran them. |
+| `stage.label`, `n` | Plain words, and how many candidates are left after the stage. Fixed stages first (`goal: null`): points in the area circle, then somewhere to stand (= `searched`). Then one stage per goal that gates, cheapest first, in the order core ran them, labelled with the start of its cost function's `about` (up to the first `:` or `;`), or its name. |
 | `stage.goal` | The goal whose gate it is, or `null`. |
 
 **The browser rule** (core does the same; `rebuild` in `crates/contracts/tests/fixtures.rs` is the reference):
