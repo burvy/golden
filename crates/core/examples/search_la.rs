@@ -57,6 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 standing,
                 framing,
                 max_spots,
+                goals: Vec::new(),
+                lens_deg: contracts::DEFAULT_LENS_DEG,
             };
             let t = Instant::now();
             let out = search(&grid, &brief, offset_s)?;

@@ -1,0 +1,48 @@
+{
+  "text": "a tree in front of the tower, sun going down between buildings, street level",
+  "area": { "lat": 34.0490, "lon": -118.2510, "radius_m": 300 },
+  "date": "2026-11-14",
+  "tz": "America/Los_Angeles",
+  "event": "sunset",
+  "standing": "ground",
+  "framing": "between",
+  "max_spots": 10,
+  "lens_deg": 50,
+  "goals": [
+    { "use": "sun_between", "weight": 1.0 },
+    {
+      "use": "in_front",
+      "args": { "a": { "kind": "tree" }, "b": { "id": "costar:1234567" } },
+      "must": true
+    },
+    {
+      "def": {
+        "name": "tree_framing_the_tower",
+        "about": "A tree within 300 m of the tower, in the same frame, nearer than it",
+        "must": { "op": "gt", "x": { "f": "visible", "obj": { "id": "costar:1234567" } }, "than": { "num": 0.5 } },
+        "score": {
+          "op": "and",
+          "of": [
+            {
+              "op": "bump",
+              "x": {
+                "f": "bearing_diff",
+                "a": { "kind": "tree", "near": { "id": "costar:1234567" }, "within_m": 300 },
+                "b": { "id": "costar:1234567" }
+              },
+              "at": 0,
+              "width": 25
+            },
+            {
+              "op": "lt",
+              "x": { "f": "dist", "obj": { "kind": "tree", "near": { "id": "costar:1234567" }, "within_m": 300 } },
+              "than": { "f": "dist", "obj": { "id": "costar:1234567" } }
+            },
+            { "op": "ramp", "x": { "f": "size_deg", "obj": { "id": "costar:1234567" } }, "lo": 2, "hi": 10 }
+          ]
+        }
+      },
+      "weight": 0.5
+    }
+  ]
+}

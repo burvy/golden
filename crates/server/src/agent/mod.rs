@@ -249,6 +249,8 @@ async fn read_brief(st: &AppState, req: &AgentRequest, now: DateTime<Utc>, llm: 
         standing,
         framing,
         max_spots: 10,
+        goals: Vec::new(),
+        lens_deg: contracts::DEFAULT_LENS_DEG,
     };
     log.add("read", format!(
         "{} read: {}, {}, {}, {}, {} (by {by})",

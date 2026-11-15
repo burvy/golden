@@ -401,6 +401,7 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         sun,
         why,
         building_id: None,
+        scores: Vec::new(),
     }
 }
 
@@ -466,6 +467,8 @@ mod tests {
             standing,
             framing,
             max_spots: 10,
+            goals: Vec::new(),
+            lens_deg: contracts::DEFAULT_LENS_DEG,
         }
     }
 
