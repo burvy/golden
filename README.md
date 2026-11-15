@@ -1,21 +1,22 @@
 # `golden`
-We allow you to find sunset positions for your photos!
+Find where to stand, for any shot.
 
-Tell golden the shot you want ("sun setting between two towers, from a rooftop, late June"). 
-It finds where to stand in the city, shows you the skyline and the sun's path from there, 
-and tells you who to ask for access.
-Design: [DESIGN.md](DESIGN.md).
+Tell golden the shot you want in plain English ("sun setting between two towers, from a rooftop, tonight").
+It asks a question or two, turns your words into goals you can see and edit, searches every standpoint in the area,
+and gives back a short ranked list. For each spot you get the sun over the skyline in 3D, a Vexcel aerial photo,
+and, in LA, who to call about the building (CoStar).
 
-(some screenshot here)
+**Try it:** https://burvy.dev/golden (cached demo areas: downtown Los Angeles and Princeton).
+Design: [DESIGN.md](DESIGN.md). Cost-function library results: [docs/library-lab.md](docs/library-lab.md).
 
-HackPrinceton Fall 2026 Entertainment track - CoStar "AI for the Built World"
+HackPrinceton Fall 2026: Entertainment track, CoStar "AI for the Built World".
 
 ## Run it
 
-**Prerequisites:** Rust (stable) <!--TODO Gogi: Version-->, Node 20+ (once `web/` exists). Windows: run the scripts from PowerShell.
+**Prerequisites:** Rust (stable). Nothing else: `web/` is plain HTML/JS served by the server, with no build step. Windows: run the scripts from PowerShell.
 
 ```powershell
-.\build.ps1 # builds everything  <!-- TODO Gogi: what is "everything" -->
+.\build.ps1 # builds the Rust workspace in release (-Test also runs the tests)
 .\run.ps1 # starts the server
 ```
 Then open http://localhost:8787.
@@ -25,14 +26,13 @@ Without the scripts (any OS), from the repo root:
 cargo run --release -p server   # serves web/ at / and the API under /api
 ```
 Open http://localhost:8787 (phone on the same Wi-Fi: set `GOLDEN_BIND=0.0.0.0:8787` and open the laptop's IP).
-Type a brief such as "sunset between two buildings from a rooftop in Princeton tonight" and press Find spots. The first
+Type a shot into Golden Chat, e.g. "sunset between two buildings from a rooftop in Princeton tonight". The first
 search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env` (or point `VEXCEL_ENV_FILE` / `ANTHROPIC_ENV_FILE` at a file holding just the key); the server prints at startup whether it found each one. With no Claude key
 the agent runs as an offline mock, and opened as a file (no server) the page shows sample data.
 
 ## Test
 ```sh
 cargo test --workspace
-cd web && npm run build # once web/ exists
 ```
 
 ## Configuration
@@ -67,7 +67,7 @@ behind the guards in `crates/server/src/guard.rs`:
 $env:GOLDEN_OFFLINE = "1"                          # never download: Vexcel, USGS LiDAR, Google, detection
 $env:VEXCEL_CACHE_DIR = "D:\golden-cache"       # the pre-fetched demo areas (Downtown LA, Princeton)
 $env:GOLDEN_CLAUDE_DAILY_MAX = "300"               # Claude calls a day for the whole site (or GOLDEN_CLAUDE=off)
-$env:GOLDEN_BIND = "127.0.0.1:8787"                # loopback only (the default); nginx proxies /golden/api/ here
+$env:GOLDEN_BIND = "127.0.0.1:8787"                # loopback only (the default); nginx proxies /golden/api/ here (burvy.dev uses 8797)
 cargo run --release -p server
 ```
 
@@ -92,37 +92,47 @@ few MB). Delete `<cache>/scene/` any time to reclaim it; scenes are rebuilt on d
 grids and 32 scenes are kept.
 
 ## How it works
-<!-- TODO by H20: 4–5 plain steps, e.g. -->
-1. **Height map:** Vexcel's 7.5 cm surface model of every roof and tree, cached and downsampled to ~1 m.
-2. **Sun:** NOAA formulas give the sun's direction and height for any time and place.
-3. **Horizon:** from any spot, we trace toward the sunset to find exactly when buildings hide the sun.
-4. **Search:** the whole area is scored against your brief, and the best spots go on the map.
-5. **Agent:** turns the spots into a call sheet with times, backups, the view, and who to call (CoStar).
+1. **Height map:** Vexcel's surface model of every roof, tree and street (6 cm tiles, ~1 m coarse), cached on disk.
+   Outside Vexcel's area, USGS 3DEP LiDAR fills in.
+2. **Sun:** NOAA's formulas give the sun's direction and height for any time and place (matches NOAA's own
+   calculator to within 1 s and 0.01 deg).
+3. **Chat to goals:** Claude (or an offline reader with no key) turns your words into goals: library cost functions
+   such as `sun_between`, `open_horizon` or `in_front`, each a must or a weight. You can edit them in the goals panel.
+4. **Funnel search:** every standpoint on a grid (up to 1,600) is checked against the goals, cheapest first.
+   A failed must drops the point before the costly skyline trace. Survivors are ranked by the weighted goals,
+   and each spot reports a score and a reason per goal.
+5. **Library:** cost functions are small JSON expressions over features core computes (distance, bearing,
+   line of sight to objects, sun scores). One is kept only if its cheap check never loses a top-10 spot:
+   15 kept, 100% recall over 18 places and 3 days, dropping a median 41-93% of standpoints early
+   ([docs/library-lab.md](docs/library-lab.md)). With `GOLDEN_PLANNER=1`, Claude also writes, tests and saves new ones.
+6. **Results:** the map shows a layer per goal; each spot has Map / Photo / 3D view tabs and, in LA, CoStar contacts.
 
 ## Why not PhotoPills?
-<!-- TODO by H20: short version of DESIGN.md "What we offer that PhotoPills doesn't" -->
 PhotoPills tells you where the sun is. golden tells you where to stand, and shows you the shot, in a city full of buildings.
 
 ## Limits
-<!-- TODO by H20: be honest; judges trust this -->
-- Vexcel aerial photos and height maps: Los Angeles, Houston and Princeton. Elsewhere in the US, heights come
-  from USGS LiDAR (older, coarser) and the map from Esri.
+- Vexcel heights and aerial photos: Los Angeles, Houston and Princeton. Elsewhere in the US, heights come from
+  USGS LiDAR (older, coarser) and the map from Esri. The public site serves only its cached areas.
+- 3D view: needs a Vexcel mesh, so it works in LA but not yet in Princeton.
 - CoStar buildings and contacts: Los Angeles and Houston only, so "who to call" is empty elsewhere.
-- Height map date: LA flown 19–29 April 2026 (Vexcel collection `n34w118-us-ca-losangeles-2026`); newer buildings may be missing.
-- What's computed vs estimated: <!-- TODO -->
+- Objects the search knows: CoStar buildings, plus Vexcel detections (building, tree, car, rooftop HVAC unit,
+  swimming pool, water tower). No water bodies or benches yet.
+- Height map date: LA flown 19-29 April 2026 (Vexcel collection `n34w118-us-ca-losangeles-2026`); newer buildings may be missing.
+- Computed vs estimated: sun times, skylines and scores are computed from the height map. Photo notes are the
+  AI's reading of aerial photos, and are labelled as such. No weather yet.
 
 ## Repo map
-| Folder | What | Owner |
-|---|---|---|
-| `crates/core` | Pure maths: coordinates, sun, horizon, scoring, search. No network, no files. | burvy |
-| `crates/vexcel` | Height map and aerial photo download, cache, downsample | Gogi |
-| `crates/lidar` | Backup height map outside Vexcel's area (USGS 3DEP LiDAR, public, no key), same `DsmGrid` | Gogi |
-| `crates/costar` | CoStar kit loader + building lookup | Kinesiology <!-- TODO name --> |
-| `crates/server` | HTTP API on :8787 and the agent | Gogi |
-| `web/` | Map, brief box, spot card, 3D skyline | Frontend <!-- TODO name --> |
-| `docs/` | Contracts, pitch, Devpost, devlogs (`docs/<name>/DEVLOG.md`) | everyone |
-| `fixtures/` | One sample file per data shape in `docs/contracts.md` | everyone |
-| `crates/contracts` | The shapes from `docs/contracts.md` as Rust structs. Pure, so `core` can use it; IO crates fill it | everyone (contract PRs only) |
+| Folder | What |
+|---|---|
+| `crates/core` | Pure maths: coordinates, sun, horizon, scoring, search. No network, no files. |
+| `crates/vexcel` | Height map and aerial photo download, cache, downsample |
+| `crates/lidar` | Backup height map outside Vexcel's area (USGS 3DEP LiDAR, public, no key), same `DsmGrid` |
+| `crates/costar` | CoStar kit loader + building lookup |
+| `crates/server` | HTTP API on :8787, the chat and agent, the cost-function library tools, public-server guards |
+| `web/` | The page: Golden Chat, goals panel, map layers, spot card with Photo / 3D view |
+| `docs/` | Contracts, pitch, Devpost, devlogs (`docs/<name>/DEVLOG.md`) |
+| `fixtures/` | One sample file per data shape in `docs/contracts.md` |
+| `crates/contracts` | The shapes from `docs/contracts.md` as Rust structs. Pure, so `core` can use it; IO crates fill it |
 
 ## How we work
 - Read [AGENTS.md](AGENTS.md) first (people and AI agents alike).
@@ -134,4 +144,4 @@ PhotoPills tells you where the sun is. golden tells you where to stand, and show
 - Imagery and height data by Vexcel Imaging US, Inc.
 - Building data: CoStar Group; 3D tours: Matterport
 - Sun position: NOAA solar calculation formulas
-- <!-- TODO: libraries (axum, MapLibre, deck.gl, three.js, ...) -->
+- Built with Rust (axum, tokio, serde), three.js and 3d-tiles-renderer, and Claude (Anthropic)
