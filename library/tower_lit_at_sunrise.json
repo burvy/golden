@@ -1,0 +1,16 @@
+{
+  "name": "tower_lit_at_sunrise",
+  "about": "The rising sun lights a (morning light on the face you see): the sun is behind you, within 30 deg of straight behind, and a is in view. Its must (a at bearing 195-15 deg, the only side a sunrise-lit face can be on) drops points before any skyline is traced, so use it as a must",
+  "params": ["a"],
+  "must": { "op": "or", "of": [
+    { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 285, "width": 90 }, "than": { "num": 0 } },
+    { "op": "gt", "x": { "op": "bump", "x": { "f": "bearing", "obj": "a" }, "at": 0, "width": 15 }, "than": { "num": 0 } }
+  ] },
+  "score": { "op": "mul", "of": [
+    { "op": "bump", "x": { "op": "max", "of": [
+      { "f": "sun_bearing_diff", "obj": "a" },
+      { "op": "mul", "of": [ { "f": "sun_bearing_diff", "obj": "a" }, { "num": -1 } ] }
+    ] }, "at": 180, "width": 30 },
+    { "f": "visible", "obj": "a" }
+  ] }
+}

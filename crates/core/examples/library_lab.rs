@@ -67,6 +67,16 @@ const PLACES: &[Place] = &[
     // round 2: inside the same cached height maps (LA and Princeton far tiles), nothing fetched
     Place { name: "macarthur-park", city: "LA", lat: 34.0590, lon: -118.2770 },
     Place { name: "grad-college", city: "Princeton", lat: 40.3430, lon: -74.6715 },
+    // round 3: more places inside the same cached height maps, nothing fetched (skipped if not cached)
+    Place { name: "civic-center", city: "LA", lat: 34.0545, lon: -118.2430 },
+    Place { name: "fashion-district", city: "LA", lat: 34.0405, lon: -118.2505 },
+    Place { name: "chinatown", city: "LA", lat: 34.0625, lon: -118.2385 },
+    Place { name: "westlake", city: "LA", lat: 34.0560, lon: -118.2700 },
+    Place { name: "echo-park", city: "LA", lat: 34.0700, lon: -118.2600 },
+    Place { name: "convention-center", city: "LA", lat: 34.0400, lon: -118.2690 },
+    Place { name: "princeton-stadium", city: "Princeton", lat: 40.3460, lon: -74.6440 },
+    Place { name: "mercer-west", city: "Princeton", lat: 40.3560, lon: -74.6760 },
+    Place { name: "carnegie-north", city: "Princeton", lat: 40.3400, lon: -74.6500 },
 ];
 
 /// (date, UTC offset in LA, UTC offset in Princeton). The offset only changes printed times.
@@ -180,7 +190,59 @@ fn scenarios() -> Vec<Scenario> {
                 {"use":"sun_clear"}]"#
                 .into()
         }),
+        // ---- round 3 shot classes ----
+        sunrise(plain("sunrise-silhouette", "dawn silhouette: the sun comes up from behind the tower (sun_behind, sun within 5 deg of the tower; a must)", Standing::Any, |c| {
+            format!(
+                r#"[{{"def":{{"name":"sun_behind_tower","about":"Sun rises from behind the tower",
+                    "score":{{"op":"mul","of":[{{"op":"bump","x":{{"f":"sun_bearing_diff","obj":{t}}},"at":0,"width":5}},{{"f":"sun_behind"}}]}}}},"must":true,"weight":1}}]"#,
+                t = c.tower
+            )
+        })),
+        sunrise(plain(
+            "sunrise-between-towers",
+            "the sun rises between the two tallest buildings, both in one frame, in front of you (a must); clear sky weighted 0.5",
+            Standing::Any,
+            |c| {
+                format!(
+                    r#"[{{"def":{{"name":"sun_between_towers","about":"Sun rises between the two towers",
+                    "score":{{"op":"and","of":[
+                        {{"op":"lt","x":{{"op":"mul","of":[{{"f":"sun_bearing_diff","obj":{t}}},{{"f":"sun_bearing_diff","obj":{u}}}]}},"than":{{"num":0}}}},
+                        {{"op":"gt","x":{{"op":"bump","x":{{"f":"sun_bearing_diff","obj":{t}}},"at":0,"width":90}},"than":{{"num":0}}}},
+                        {{"f":"in_frame","a":{t},"b":{u}}}]}}}},"must":true,"weight":1}},
+                    {{"use":"sun_clear","weight":0.5}}]"#,
+                    t = c.tower,
+                    u = c.tower2
+                )
+            },
+        )),
+        plain("lit-tower", "golden light on the tower: the setting sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5", Standing::Any, lit_tower),
+        sunrise(plain("sunrise-lit-tower", "morning light on the tower: the rising sun behind you (within 30 deg of straight behind), the tower in view (a must); fills weighted 0.5", Standing::Any, lit_tower)),
+        sunrise(plain("sunrise-clear", "sunrise in view from the horizon up, roof or street (sun only)", Standing::Any, |_| r#"[{"use":"sun_clear"}]"#.into())),
+        sunrise(plain("sunrise-open-view", "the library's open_horizon at sunrise: in view from within 1 deg of the horizon (a must), ranked on clear sky (sun only)", Standing::Any, |_| {
+            r#"[{"use":"open_horizon","must":true,"weight":1}]"#.into()
+        })),
+        plain("wide-gap", "the library's sun_wide_gap: the sun sets into a wide opening (6-20 deg) and stays in view in it (a must; sun only)", Standing::Any, |_| {
+            r#"[{"use":"sun_wide_gap","must":true,"weight":1}]"#.into()
+        }),
     ]
+}
+
+/// The same scenario at sunrise.
+fn sunrise(s: Scenario) -> Scenario {
+    Scenario { event: Event::Sunrise, ..s }
+}
+
+/// Low sun on the tower: the sun behind you within 30 deg of straight behind (|sun_bearing_diff| near
+/// 180), the tower in view; fills weighted 0.5. Same goals at sunset and sunrise.
+fn lit_tower(c: &Ctx) -> String {
+    format!(
+        r#"[{{"def":{{"name":"tower_lit","about":"The low sun lights the tower",
+            "score":{{"op":"mul","of":[
+                {{"op":"bump","x":{{"op":"max","of":[{{"f":"sun_bearing_diff","obj":{t}}},{{"op":"mul","of":[{{"f":"sun_bearing_diff","obj":{t}}},{{"num":-1}}]}}]}},"at":180,"width":30}},
+                {{"f":"visible","obj":{t}}}]}}}},"must":true,"weight":1}},
+            {{"use":"fills","args":{{"a":{t}}},"weight":0.5}}]"#,
+        t = c.tower
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -293,7 +355,7 @@ fn gates() -> Vec<Gate> {
     let mut out = vec![
         entry("tower_framable", &["tower-and-sunset", "soft-tower", "tower-framing-sunset"]),
         entry("tower_toward_sunset", &["sun-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline"]),
-        entry("tower_toward_sunrise", &["sunrise-by-tower"]),
+        entry("tower_toward_sunrise", &["sunrise-by-tower", "sunrise-silhouette"]),
         entry("tower_framed_toward_sunset", &["tower-framing-sunset"]),
         Gate { replaces: Some(0), ..entry("sunset_beside", &["sun-by-tower"]) },
         Gate { replaces: Some(0), ..entry("sunrise_beside", &["sunrise-by-tower"]) },
@@ -303,6 +365,11 @@ fn gates() -> Vec<Gate> {
         Gate { replaces: Some(0), ..entry("sunset_between_two", &["between-towers"]) },
         Gate { replaces: Some(0), ..entry("towers_over", &["looking-up"]) },
         Gate { replaces: Some(0), ..entry("skyline_view", &["rooftop-skyline"]) },
+        // round 3: sunrise mirrors and the low sun on the tower
+        Gate { replaces: Some(0), ..entry("sunrise_behind", &["sunrise-silhouette"]) },
+        Gate { replaces: Some(0), ..entry("sunrise_between_two", &["sunrise-between-towers"]) },
+        Gate { replaces: Some(0), ..entry("tower_lit_at_sunset", &["lit-tower"]) },
+        Gate { replaces: Some(0), ..entry("tower_lit_at_sunrise", &["sunrise-lit-tower"]) },
         // why framing gates prune so little: the two halves of the size range, and the line of sight
         tower_test("tower_over_2_deg", r#"{"op":"gt","x":{"f":"size_deg","obj":TOWER},"than":{"num":2}}"#),
         tower_test("tower_under_40_deg", r#"{"op":"lt","x":{"f":"size_deg","obj":TOWER},"than":{"num":40}}"#),
@@ -341,13 +408,28 @@ fn gates() -> Vec<Gate> {
                     {{"op":"gt","x":{{"op":"bump","x":{{"f":"bearing","obj":{{"kind":"building"}}}},"at":{at:.1},"width":{width:.1}}},"than":{{"num":0}}}}]}}}}"#
         )
     }));
-    out.push(inline("tower_on_sun_track".into(), GateKind::WhatIf, &["sun-by-tower", "sunrise-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline"], |c| {
+    out.push(inline("tower_on_sun_track".into(), GateKind::WhatIf, &["sun-by-tower", "sunrise-by-tower", "tower-framing-sunset", "silhouette", "rooftop-skyline", "sunrise-silhouette"], |c| {
         let (lo, hi) = c.track_az;
         let (at, width) = ((lo + hi) / 2.0, (hi - lo) / 2.0 + 15.0);
         format!(
             r#"{{"name":"x","about":"the tower is within 15 deg of this day's sun track",
                 "score":{{"op":"gt","x":{{"op":"bump","x":{{"f":"bearing","obj":{t}}},"at":{at:.1},"width":{width:.1}}},"than":{{"num":0}}}}}}"#,
             t = c.tower
+        )
+    }));
+    // The lit-tower mirror: the tower within 30 deg of straight opposite this day's sun track.
+    out.push(inline("tower_opposite_sun_track".into(), GateKind::WhatIf, &["lit-tower", "sunrise-lit-tower"], |c| {
+        let (lo, hi) = c.track_az;
+        let (at, width) = (((lo + hi) / 2.0 + 180.0) % 360.0, (hi - lo) / 2.0 + 30.0);
+        format!(
+            r#"{{"name":"x","about":"the tower is within 30 deg of straight opposite this day's sun track",
+                "score":{{"op":"or","of":[
+                    {{"op":"gt","x":{{"op":"bump","x":{{"f":"bearing","obj":{t}}},"at":{at:.1},"width":{width:.1}}},"than":{{"num":0}}}},
+                    {{"op":"gt","x":{{"op":"bump","x":{{"f":"bearing","obj":{t}}},"at":{a2:.1},"width":{width:.1}}},"than":{{"num":0}}}},
+                    {{"op":"gt","x":{{"op":"bump","x":{{"f":"bearing","obj":{t}}},"at":{a3:.1},"width":{width:.1}}},"than":{{"num":0}}}}]}}}}"#,
+            t = c.tower,
+            a2 = at + 360.0,
+            a3 = at - 360.0
         )
     }));
     out
@@ -422,9 +504,9 @@ fn seen_below(g: &DsmGrid, e: Eye, t: &SunTrack, top: f64, top_deg: f64) -> bool
 }
 
 const RAY_GATES: &[RayGate] = &[
-    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
+    RayGate { name: "ray_sun_seen_below_6", on: &["clear", "between", "street-between", "open-view", "sunrise-clear", "sunrise-open-view", "wide-gap"], pass: |g, e, t, top| seen_below(g, e, t, top, 6.0) },
     // open-view's must is `sun_hidden_elev < 1`: this is that test, exactly, before any skyline
-    RayGate { name: "ray_sun_seen_below_1", on: &["open-view"], pass: |g, e, t, top| seen_below(g, e, t, top, 1.0) },
+    RayGate { name: "ray_sun_seen_below_1", on: &["open-view", "sunrise-open-view"], pass: |g, e, t, top| seen_below(g, e, t, top, 1.0) },
     RayGate { name: "ray_sun_seen_below_3", on: &["clear", "between", "street-between"], pass: |g, e, t, top| seen_below(g, e, t, top, 3.0) },
     RayGate {
         name: "ray_blocked_at_sunset",
