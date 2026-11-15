@@ -26,7 +26,7 @@ cargo run --release -p server   # serves web/ at / and the API under /api
 ```
 Open http://localhost:8787 (phone on the same Wi-Fi: set `GOLDEN_ADDR=0.0.0.0:8787` and open the laptop's IP).
 Type a brief such as "sunset between two buildings from a rooftop in Princeton tonight" and press Find spots. The first
-search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env`; with no Claude key
+search in a new area downloads its heights (~10–30 s); after that it is cached. Keys go in `env/.env` (or point `VEXCEL_ENV_FILE` / `ANTHROPIC_ENV_FILE` at a file holding just the key); the server prints at startup whether it found each one. With no Claude key
 the agent runs as an offline mock, and opened as a file (no server) the page shows sample data.
 
 ## Test
@@ -40,18 +40,21 @@ Set these as environment variables. **Never commit their values.**
 
 | Variable | What for | If missing |
 |---|---|---|
-| `VEXCEL_API_KEY` | Height maps and aerial photos | Falls back to `VEXCEL_ENV_FILE`. With neither, areas already in the cache still work; new areas fail with a "no Vexcel key" error |
-| `VEXCEL_ENV_FILE` | Path to a `.env` file with the keys (`VEXCEL_API_KEY=...`, `ANTHROPIC_API_KEY=...`), instead of setting them directly. Keep it in `env/` (gitignored) | `env/.env` (so running from the repo root just works) |
+| `VEXCEL_API_KEY` | Height maps and aerial photos | Read from `VEXCEL_ENV_FILE`, else the shared `.env`. With none, areas already in the cache still work; new areas fail with a "no Vexcel key" error |
+| `VEXCEL_ENV_FILE` | Path to the Vexcel key file: either just the key on one line (as Vexcel hands it out), or a `.env` with `VEXCEL_API_KEY=...`. If `GOLDEN_ENV_FILE` isn't set, it's also the shared `.env` the other `NAME=...` keys are read from. Keep key files out of git (`env/` and `*.env` are gitignored) | The shared `.env` |
+| `ANTHROPIC_ENV_FILE` | Path to the Claude key file: just the key on one line, or a `.env` with `ANTHROPIC_API_KEY=...` | The shared `.env` |
+| `GOLDEN_ENV_FILE` | Path to the shared `.env` with several `NAME=value` lines (`VEXCEL_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_MAPS_API_KEY`, ...). A bare key is never read from it | `VEXCEL_ENV_FILE`, else `env/.env` (so running from the repo root just works) |
 | `VEXCEL_CACHE_DIR` | Where downloaded Vexcel height-map tiles are kept (gitignored). A 200 m area is ~300 MB, a 1 km area ~1 GB | `cache/` in the folder you run from |
 | `LIDAR_CACHE_DIR` | Where USGS LiDAR downloads are kept (gitignored). ~20 MB per 150 m radius, ~100 MB per 1 km | `VEXCEL_CACHE_DIR`, else `cache/` |
 | `GOOGLE_MAPS_API_KEY` | Photo-match agent's place search (Places API (New): coordinates, place photos). Same `env/.env` | Landmarks via Esri's geocoder, no place photos |
-| `ANTHROPIC_API_KEY` | The agent (`POST /api/agent`) reads the brief and writes the call sheet with Claude. Get one at platform.claude.com; put it in `env/.env`. Never printed or logged | The agent runs as the offline mock (rule reader + templates; every number is the same) |
+| `ANTHROPIC_API_KEY` | The agent (`POST /api/agent`) reads the brief and writes the call sheet with Claude. Get one at platform.claude.com; put it in `env/.env` or point `ANTHROPIC_ENV_FILE` at it. Never printed or logged | The agent runs as the offline mock (rule reader + templates; every number is the same) |
 | `GOLDEN_CLAUDE_MODEL` | Claude model ID for the agent | `claude-sonnet-5-5` |
 | `COSTAR_KIT_DIR` | Path to the CoStar data kit (kept out of git) | Building lookups use fixtures |
 
 PowerShell example (current window only):
 ```powershell
-$env:VEXCEL_ENV_FILE = "$PWD\env\.env"
+$env:VEXCEL_ENV_FILE = "$PWD\env\vexcel.env"      # just the key, or VEXCEL_API_KEY=...
+$env:ANTHROPIC_ENV_FILE = "$PWD\env\claude.env"   # just the key, or ANTHROPIC_API_KEY=...
 cargo run -p vexcel --example fetch_dsm -- 34.049 -118.251 60   # lat lon radius_m: checks the key works
 ```
 

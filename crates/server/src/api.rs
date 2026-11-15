@@ -14,15 +14,12 @@ use axum::{Json, Router};
 use chrono::NaiveDate;
 use contracts::{Brief, BuildingList, Event, PhotoKind, PhotoMeta, SearchResult, Standing};
 use golden_core::horizon::{horizon, HorizonQuery};
+use golden_core::search::skyline_need_m;
 use golden_core::sunblock::sun_block;
 use serde::Deserialize;
 
 use crate::state::{ApiErr, AppState};
 use crate::{scene, sunpath, tz};
-
-/// Extra height map fetched around a search area, so skylines see buildings outside it. Core traces
-/// rays up to 1.5 km; past the grid edge they just stop, so this trades a little far skyline for download size.
-pub const SEARCH_SKYLINE_M: f64 = 700.0;
 
 pub fn routes(state: Arc<AppState>) -> Router {
     Router::new()
@@ -157,7 +154,7 @@ pub async fn run_search(st: &AppState, brief: Brief) -> Result<SearchResult, Api
     }
     let date = parse_date(&brief.date)?;
     let zone = tz::parse(&brief.tz).map_err(ApiErr::bad)?;
-    let grid = st.grids.around(brief.area.lat, brief.area.lon, brief.area.radius_m + SEARCH_SKYLINE_M).await?;
+    let grid = st.grids.around(brief.area.lat, brief.area.lon, skyline_need_m(brief.area.radius_m)).await?;
     let b = brief.clone();
     let out = blocking(move || golden_core::search::search(&grid, &b, tz::offset_s(zone, date)))
         .await?
@@ -348,6 +345,16 @@ async fn get_building(State(st): State<Arc<AppState>>, Path(id): Path<String>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_largest_search_gets_its_whole_skyline() {
+        // A brief of the maximum radius still fits the 3 km fetch limit with the full skyline around it,
+        // and the grid we'd fetch covers what core traces (no rays cut off at the grid edge).
+        let need = skyline_need_m(contracts::search::MAX_BRIEF_RADIUS_M);
+        assert!(need <= vexcel::MAX_RADIUS_M, "{need} m");
+        assert!(crate::state::fetch_radius(need) >= need);
+        assert!(skyline_need_m(300.0) >= 300.0 + golden_core::search::SKYLINE_RADIUS_M);
+    }
 
     #[test]
     fn photo_ids_round_trip() {

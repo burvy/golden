@@ -12,7 +12,7 @@
 use std::time::Instant;
 
 use contracts::{Area, Brief, Event, Framing, Spot, Standing};
-use golden_core::search::{search, SearchOutput, SKYLINE_RADIUS_M};
+use golden_core::search::{search, skyline_need_m, SearchOutput};
 
 const DATES: [(&str, i32, &str); 2] = [("2026-06-21", -7 * 3600, "PDT"), ("2026-11-14", -8 * 3600, "PST")];
 const FRAMINGS: [Framing; 3] = [Framing::Clear, Framing::Between, Framing::Behind];
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let opts = vexcel::DsmOptions { near_radius_m: 1.0, ..vexcel::DsmOptions::default() };
     let started = Instant::now();
-    let grid = vexcel::get_dsm_with(lat, lon, radius_m + SKYLINE_RADIUS_M, &opts).await?;
+    let grid = vexcel::get_dsm_with(lat, lon, skyline_need_m(radius_m), &opts).await?;
     println!(
         "Height map: {} x {} cells of {} m around {lat}, {lon} ({:.1?})",
         grid.meta.width,
