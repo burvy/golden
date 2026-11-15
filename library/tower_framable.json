@@ -1,0 +1,32 @@
+{
+  "name": "tower_framable",
+  "about": "Tower fits the frame: a looks 2-40 deg tall, the range where fills scores above 0",
+  "params": [
+    "a"
+  ],
+  "score": {
+    "op": "and",
+    "of": [
+      {
+        "op": "gt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 2
+        }
+      },
+      {
+        "op": "lt",
+        "x": {
+          "f": "size_deg",
+          "obj": "a"
+        },
+        "than": {
+          "num": 40
+        }
+      }
+    ]
+  }
+}

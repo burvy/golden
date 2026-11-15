@@ -1,0 +1,22 @@
+{
+  "name": "tower_toward_sunset",
+  "about": "Tower toward the sunset: a lies at bearing 180-330 deg, which holds the sun from 20 deg up to sunset, all year, from the tropics to 45 deg N, plus 15 deg either side",
+  "params": [
+    "a"
+  ],
+  "score": {
+    "op": "gt",
+    "x": {
+      "op": "bump",
+      "x": {
+        "f": "bearing",
+        "obj": "a"
+      },
+      "at": 255,
+      "width": 75
+    },
+    "than": {
+      "num": 0
+    }
+  }
+}

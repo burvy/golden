@@ -343,6 +343,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "contracts",
+ "costar",
+ "serde",
  "serde_json",
  "tokio",
  "vexcel",
