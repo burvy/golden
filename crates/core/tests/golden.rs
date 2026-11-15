@@ -193,6 +193,15 @@ fn weight_edits_match(grid: &DsmGrid, b: &Brief, utc_offset_s: i32, name: &str) 
     assert_eq!(first.stages.iter().filter_map(|s| s.goal.as_deref()).collect::<Vec<_>>(), ["under_40m", "sees_sun"], "{name}: cheapest gate first");
     assert!(first.stages[3].n < first.stages[1].n, "{name}: the gates drop something");
     rebuilds(&first, &first.layers, b.max_spots as usize, name);
+    // dropped by sees_sun's own gate (the second): under_40m ran first and keeps its score, the
+    // sun and roof goals were never reached
+    let sees = &first.layers[2];
+    assert!(name != "synthetic" || !sees.gate.is_empty(), "the synthetic city has cells that gate drops");
+    for &c in &sees.gate {
+        let at = |l: usize| first.layers[l].heat.values[c as usize];
+        assert_eq!((at(0), at(1), at(2)), (None, None, Some(0.0)), "{name}: cell {c}");
+        assert!(at(3).is_some_and(|v| v > 0.0), "{name}: cell {c}");
+    }
     for weights in [[0.2, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 1.0, 2.0], [0.0, 0.0, 1.0, 0.0]] {
         let mut layers = first.layers.clone();
         for (l, w) in layers.iter_mut().zip(weights) {
