@@ -2,19 +2,15 @@
 
 ## Headline numbers
 
-- **11 proven cost functions are in the search today** (more are measured and ready to add). Each one is a kind
-  of shot a filmmaker asks for: the sun beside, behind or between towers, golden light on a building,
-  an open horizon, the sun in a wide gap, looking up at a tower.
-- **None of them ever lost a best spot.** In every test the search kept 100% of its top 10 spots, on 18
-  places in downtown LA and Princeton and on 3 days (Nov 14, and both solstices: Jun 21 and Dec 21).
-  "Sun beside the tower" alone had 94 tests with spots.
-- **They skip about half the work, or more.** Depending on the shot, a median of 41-76% of candidate standpoints are
-  dropped before the expensive skyline step. Skyline traces fall from 55,248 to 21,888 for
-  "sun beside the tower", and search time halves (1.2 s -> 0.55 s).
-- **They hold on bigger areas and other buildings.** At a 500 m radius, and on the second-tallest
-  building, every one still keeps 100% of the top spots.
-- **Next step, measured but not built yet:** a 4-ray "is the sun visible low" check (task 065) would
-  drop 97% of candidates for open-horizon shots, about 10x faster than today.
+- **15 cost functions measured and kept**, 11 of them in the search today (the other 4 are next).
+- **Recall kept: 100%.** Every one keeps all of the search's top 10 spots in every test: 18 places in
+  downtown LA and Princeton, 3 days (Nov 14, Jun 21, Dec 21), up to 100 runs with spots per entry.
+- **They skip half the work or more.** 12 of them have a cheap check that drops a median 41-93% of
+  candidate standpoints before the skyline trace (the other 3 get theirs with task 065).
+  Example: "the sun setting down a street" traces 55,248 -> 27,282 skylines; search 1283 -> 626 ms.
+- **Shots covered, sunset and sunrise:** sun alone (open horizon, wide gap, down the street, keyhole),
+  one tower (sun beside or behind it, golden light on it, looking up at it), two towers (sun between
+  them, the skyline glowing).
 
 Task 062. The goal is a growing library of cost functions that drop candidates cheaply, before the
 skyline trace, without losing the spots an ungated search ranks best. Recall is the guardrail and
