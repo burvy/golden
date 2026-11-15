@@ -9,11 +9,14 @@
 //! - `go: true` (or the user saying "just search") skips the remaining questions and uses the defaults.
 //!
 //! The settled brief carries `goals` (docs/contracts.md#goals-and-cost-functions) alongside the old fields:
-//! for now one library goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`), which is
-//! what an empty `goals` means anyway, so the search is unchanged until core reads goals (task 051).
+//! the sun goal named after the framing (`sun_clear` / `sun_between` / `sun_behind`, what an empty `goals`
+//! means anyway), plus object goals as data with kinds in the user's words ("fountain in front of a tower" ->
+//! `{"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}`).
+//! The search can't score objects until tasks 051/052, so until then the chat says so plainly (`note`), marks
+//! them "(not checked yet)", and tells the sheet writer not to claim them.
 
 use super::*;
-use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal};
+use contracts::{ChatAsk, ChatMessage, ChatReply, ChatRequest, ChatRole, Goal, GoalFn, ObjRef};
 
 /// The most questions the agent asks before it searches with its defaults.
 pub const MAX_ASKS: usize = 3;
@@ -61,10 +64,53 @@ enum Topic {
     Framing,
 }
 
-/// What one turn of reading decided: the fields, which of them the user actually said, and the next question.
+/// How two things the user named should sit in the frame. Names are the seed library's (docs/metrics.md v2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Relation {
+    InFront,
+    LinedUp,
+    Beside,
+}
+
+impl Relation {
+    fn name(self) -> &'static str {
+        match self {
+            Relation::InFront => "in_front",
+            Relation::LinedUp => "lined_up",
+            Relation::Beside => "beside",
+        }
+    }
+
+    fn words(self) -> &'static str {
+        match self {
+            Relation::InFront => "in front of",
+            Relation::LinedUp => "lined up with",
+            Relation::Beside => "beside",
+        }
+    }
+}
+
+/// An object goal in the user's words: `a` (relation) `b`, e.g. fountain in front of tower.
+#[derive(Debug, Clone, PartialEq)]
+struct Rel {
+    relation: Relation,
+    a: String,
+    b: String,
+}
+
+impl Rel {
+    fn words(&self) -> String {
+        format!("{} {} a {}", self.a, self.relation.words(), self.b)
+    }
+}
+
+/// What one turn of reading decided: the fields, which of them the user actually said, the object goals, and
+/// the next question.
 struct Turn {
     fields: Fields,
     known: Vec<Topic>,
+    rels: Vec<Rel>,
     ask: Option<ChatAsk>,
 }
 
@@ -91,7 +137,7 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     let ask = if go { None } else { turn.ask };
 
     let (mut brief, place) = settle(st, &text, &turn.fields, req.area.as_ref(), req.date.as_deref(), &req.tz, now, &mut log).await?;
-    brief.goals = goals_for(&brief);
+    brief.goals = goals_for(&brief, &turn.rels);
     let mut known = turn.known;
     if req.area.is_some() {
         known.push(Topic::Place);
@@ -99,9 +145,10 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
     if req.date.is_some() {
         known.push(Topic::Date);
     }
-    let words = understood_marked(&brief, &place, &known, ask.is_some());
+    let mut words = understood_marked(&brief, &place, &known, ask.is_some());
+    words.extend(turn.rels.iter().map(|r| format!("{} (not checked yet)", r.words())));
     if ask.is_some() {
-        return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model });
+        return Ok(ChatReply { understood: words, ask, brief: None, sheet: None, model, note: None });
     }
 
     let by = if model == "mock" { "the offline reader".to_string() } else { model.clone() };
@@ -111,8 +158,23 @@ async fn chat_with(st: &AppState, req: ChatRequest, now: DateTime<Utc>, llm: Opt
         n => format!("{n} questions"),
     };
     log.add("chat", format!("Understood after {qs}: {} (by {by})", words.join(", ")));
-    let sheet = sheet_for(st, brief.clone(), place, llm.as_ref(), log).await?;
-    Ok(ChatReply { understood: words, ask: None, brief: Some(brief), sheet: Some(sheet), model })
+    let note = cant_check_note(&turn.rels, brief.event);
+    if let Some(n) = &note {
+        log.add("goals", format!("{n} (object goals need core tasks 051/052)"));
+    }
+    // The sheet writer reads brief.text: tell it what the search ignored, then put the user's words back.
+    let mut for_sheet = brief.clone();
+    for_sheet.text = text_for_sheet(&brief.text, &turn.rels);
+    let place_name = place.name.clone();
+    let mut sheet = sheet_for(st, for_sheet, place, llm.as_ref(), log).await?;
+    sheet.brief.text = brief.text.clone();
+    if keep_unchecked_out(&mut sheet, &turn.rels, &place_name) {
+        sheet.steps.push(AgentStep { tool: "goals".into(), summary: "Reworded the sheet: it named things the search didn't check".into() });
+    }
+    if let Some(n) = &note {
+        sheet.caveats.insert(0, n.clone());
+    }
+    Ok(ChatReply { understood: words, ask: None, brief: Some(brief), sheet: Some(sheet), model, note })
 }
 
 // ---- pure pieces ---------------------------------------------------------------------------------
@@ -127,14 +189,143 @@ fn user_text(m: &[ChatMessage]) -> String {
         .join(". ")
 }
 
-/// Pure: the goals for a settled brief. One library goal per framing; the seed library (task 051) names them.
-fn goals_for(b: &Brief) -> Vec<Goal> {
-    let name = match b.framing {
+/// Pure: the goals for a settled brief: the sun goal for its framing, then one goal per object relation, its
+/// objects as kinds in the user's words. The seed library (tasks 051/052) names them.
+fn goals_for(b: &Brief, rels: &[Rel]) -> Vec<Goal> {
+    let sun = match b.framing {
         Framing::Clear => "sun_clear",
         Framing::Between => "sun_between",
         Framing::Behind => "sun_behind",
     };
-    vec![Goal::using(name)]
+    let kind = |k: &str| ObjRef::Kind { kind: k.to_string(), near: None, within_m: None };
+    let objects = rels.iter().map(|r| {
+        let mut g = Goal::using(r.relation.name());
+        if let GoalFn::Use { args, .. } = &mut g.cost {
+            args.insert("a".into(), kind(&r.a));
+            args.insert("b".into(), kind(&r.b));
+        }
+        g
+    });
+    std::iter::once(Goal::using(sun)).chain(objects).collect()
+}
+
+/// Pure: the kinds named in the object goals, each once, in order.
+fn kinds(rels: &[Rel]) -> Vec<&str> {
+    let mut k: Vec<&str> = Vec::new();
+    for r in rels {
+        for x in [r.a.as_str(), r.b.as_str()] {
+            if !k.contains(&x) {
+                k.push(x);
+            }
+        }
+    }
+    k
+}
+
+/// Pure: the plain sentence for the results when the search can't check the object goals (all of them, until
+/// tasks 051/052): "I can't place the fountain or the tower yet; searching for the sunset part."
+fn cant_check_note(rels: &[Rel], event: Event) -> Option<String> {
+    let k = kinds(rels);
+    (!k.is_empty()).then(|| {
+        let things = k.iter().map(|x| format!("the {x}")).collect::<Vec<_>>().join(" or ");
+        format!("I can't place {things} yet; searching for the {} part.", event_word(event).to_lowercase())
+    })
+}
+
+/// Pure: brief.text as the sheet writer should read it: the user's words plus what the search didn't check.
+fn text_for_sheet(text: &str, rels: &[Rel]) -> String {
+    if rels.is_empty() {
+        return text.to_string();
+    }
+    let not = rels.iter().map(Rel::words).collect::<Vec<_>>().join("; ");
+    format!("{text}\n[Not checked by the search, so don't mention it in the title or summary: {not}. The spots are chosen for the sun only.]")
+}
+
+/// Pure: does this text name one of the kinds (as a whole word, plural allowed)?
+fn names_any(text: &str, kinds: &[&str]) -> bool {
+    let t = text.to_lowercase();
+    let words: Vec<&str> = t.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    kinds.iter().any(|k| {
+        let k = k.to_lowercase();
+        words.iter().any(|w| *w == k || w.strip_suffix('s') == Some(k.as_str()) || w.strip_suffix("es") == Some(k.as_str()))
+    })
+}
+
+/// Pure: if the sheet's title or summary claims an object the search ignored ("Fountain and tower at sunset"),
+/// fall back to the templated title and drop the summary sentences that name it. True if it changed anything.
+fn keep_unchecked_out(sheet: &mut CallSheet, rels: &[Rel], place: &str) -> bool {
+    let k = kinds(rels);
+    if k.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    if names_any(&sheet.title, &k) {
+        let b = &sheet.brief;
+        sheet.title = format!("{} · {} · {}", event_word(b.event), framing_words(b.framing), place);
+        changed = true;
+    }
+    if names_any(&sheet.summary, &k) {
+        let kept: Vec<&str> = sheet.summary.split_inclusive(['.', '!', '?']).filter(|s| !names_any(s, &k)).map(str::trim).filter(|s| !s.is_empty()).collect();
+        sheet.summary = if kept.is_empty() {
+            format!("The best spots for the {} in {}.", event_word(sheet.brief.event).to_lowercase(), place)
+        } else {
+            kept.join(" ")
+        };
+        changed = true;
+    }
+    changed
+}
+
+/// Pure: object relations the offline reader can find in the text ("a fountain in front of a tall tower").
+/// `a` is the word just before the relation, `b` the last word of the phrase after it. The sun is never an
+/// object here: how it sits is the framing.
+fn read_rels(text: &str) -> Vec<Rel> {
+    const PATTERNS: [(&str, Relation); 5] = [
+        ("in front of", Relation::InFront),
+        ("lined up with", Relation::LinedUp),
+        ("in line with", Relation::LinedUp),
+        ("next to", Relation::Beside),
+        ("beside", Relation::Beside),
+    ];
+    const SKIP: [&str; 9] = ["a", "an", "the", "some", "one", "two", "big", "tall", "small"];
+    const ENDS: [&str; 16] = ["at", "from", "with", "during", "in", "on", "and", "while", "for", "when", "as", "under", "near", "by", "of", "to"];
+    const NOT_OBJECTS: [&str; 7] = ["sun", "sunset", "sunrise", "it", "me", "us", "them"];
+    let t: String = text.to_lowercase().chars().map(|c| if c.is_alphanumeric() || c == ' ' { c } else { '.' }).collect();
+    let mut out = Vec::new();
+    for clause in t.split('.') {
+        let w: Vec<&str> = clause.split_whitespace().collect();
+        for (pat, relation) in PATTERNS {
+            let p: Vec<&str> = pat.split(' ').collect();
+            for i in 0..w.len().saturating_sub(p.len() - 1) {
+                if w[i..i + p.len()] != p[..] {
+                    continue;
+                }
+                let a = w[..i].iter().rev().find(|x| !SKIP.contains(x));
+                let b = w[i + p.len()..].iter().take_while(|x| !ENDS.contains(x)).filter(|x| !SKIP.contains(x)).last();
+                if let (Some(a), Some(b)) = (a, b) {
+                    let rel = Rel { relation, a: a.to_string(), b: b.to_string() };
+                    if !NOT_OBJECTS.contains(&rel.a.as_str()) && !NOT_OBJECTS.contains(&rel.b.as_str()) && !out.contains(&rel) {
+                        out.push(rel);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Pure: the model's object relations, kept only if both objects are named and neither is the sun.
+fn rels_from_model(v: &serde_json::Value) -> Option<Vec<Rel>> {
+    let a = v.as_array()?;
+    Some(
+        a.iter()
+            .filter_map(|o| {
+                let relation: Relation = parse_enum(&o["relation"])?;
+                let word = |k: &str| o[k].as_str().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty() && s != "sun");
+                Some(Rel { relation, a: word("a")?, b: word("b")? })
+            })
+            .collect(),
+    )
 }
 
 /// Pure: how many questions the agent has asked so far.
@@ -199,7 +390,7 @@ fn mock_turn(req: &ChatRequest, text: &str, today: NaiveDate) -> Turn {
         known.push(Topic::Place);
     }
     let ask = MOCK_ORDER.iter().find(|t| !known.contains(t)).map(|t| question(*t));
-    Turn { fields, known, ask }
+    Turn { fields, known, rels: read_rels(text), ask }
 }
 
 /// Pure: the brief in plain words. Things the user didn't say are left out while we're still asking, and
@@ -238,7 +429,10 @@ fn chat_prompt(req: &ChatRequest, today: NaiveDate, asked: usize) -> String {
          The conversation so far:\n{}\n\n\
          Return your reading: place = the place named (one of the listed places if it matches, else as written, \"\" if none); \
          date = YYYY-MM-DD if a day is implied (\"late June\" = the 24th of the next June), else \"\"; event, standing, framing \
-         (your best guess); known = the fields the filmmaker actually said or clearly implied (NOT your guesses).\n\
+         (your best guess); known = the fields the filmmaker actually said or clearly implied (NOT your guesses); \
+         objects = things they want in the shot placed relative to each other (\"a fountain in front of a tower\" = \
+         {{relation: in_front, a: fountain, b: tower}}; lined_up = one stacked on the other; beside = side by side), each \
+         object one short noun in their words, never the sun (that's framing), [] if none.\n\
          Then either ask ONE short, friendly question (under 15 words) about the most important unknown, or set ready = true.\n\
          Rules: never ask about something already answered. You have asked {asked} of at most {MAX_ASKS} questions. \
          Ask only what changes where they should stand: the place first if unknown, then how the sun sits in the frame, then roof or street. \
@@ -265,9 +459,19 @@ fn chat_schema() -> serde_json::Value {
             "known": { "type": "array", "items": { "type": "string", "enum": ["place", "date", "event", "standing", "framing"] } },
             "ready": { "type": "boolean" },
             "question": { "type": "string" },
-            "choices": { "type": "array", "items": { "type": "string" } }
+            "choices": { "type": "array", "items": { "type": "string" } },
+            "objects": { "type": "array", "items": {
+                "type": "object",
+                "properties": {
+                    "relation": { "type": "string", "enum": ["in_front", "lined_up", "beside"] },
+                    "a": { "type": "string" },
+                    "b": { "type": "string" }
+                },
+                "required": ["relation", "a", "b"],
+                "additionalProperties": false
+            } }
         },
-        "required": ["place", "date", "event", "standing", "framing", "known", "ready", "question", "choices"],
+        "required": ["place", "date", "event", "standing", "framing", "known", "ready", "question", "choices", "objects"],
         "additionalProperties": false
     })
 }
@@ -275,13 +479,14 @@ fn chat_schema() -> serde_json::Value {
 /// Pure: the model's JSON -> a turn. A question is only kept if it's not ready and the question isn't empty.
 fn turn_from_model(text: &str, v: &serde_json::Value) -> Turn {
     let fields = Fields::read(text).with_model(v);
-    let known: Vec<Topic> = v["known"].as_array().map(|a| a.iter().filter_map(|t| parse_enum(t)).collect()).unwrap_or_default();
+    let known: Vec<Topic> = v["known"].as_array().map(|a| a.iter().filter_map(parse_enum).collect()).unwrap_or_default();
     let q = v["question"].as_str().unwrap_or_default().trim();
     let ask = (!v["ready"].as_bool().unwrap_or(true) && !q.is_empty()).then(|| ChatAsk {
         question: q.to_string(),
         choices: v["choices"].as_array().map(|a| a.iter().filter_map(|c| c.as_str()).map(str::trim).filter(|c| !c.is_empty()).take(4).map(str::to_string).collect()).unwrap_or_default(),
     });
-    Turn { fields, known, ask }
+    let rels = rels_from_model(&v["objects"]).unwrap_or_else(|| read_rels(text));
+    Turn { fields, known, rels, ask }
 }
 
 async fn claude_turn(g: &Claude, req: &ChatRequest, text: &str, today: NaiveDate, asked: usize) -> Result<Turn, String> {
@@ -432,11 +637,68 @@ mod tests {
     #[test]
     fn goals_name_the_framing() {
         let mut b: Brief = serde_json::from_value(json!({"area": {"lat": 0, "lon": 0, "radius_m": 300}, "date": "2026-11-15", "framing": "between"})).unwrap();
-        assert_eq!(serde_json::to_value(goals_for(&b)).unwrap(), json!([{"use": "sun_between"}]));
+        assert_eq!(serde_json::to_value(goals_for(&b, &[])).unwrap(), json!([{"use": "sun_between"}]));
         b.framing = Framing::Behind;
-        assert_eq!(goals_for(&b)[0].name(), "sun_behind");
+        assert_eq!(goals_for(&b, &[])[0].name(), "sun_behind");
         b.framing = Framing::Clear;
-        assert_eq!(goals_for(&b)[0].name(), "sun_clear");
+        assert_eq!(goals_for(&b, &[])[0].name(), "sun_clear");
+        // object goals follow, as data, kinds in the user's words
+        assert_eq!(
+            serde_json::to_value(goals_for(&b, &read_rels("fountain in front of a tower at sunset"))).unwrap(),
+            json!([{"use": "sun_clear"}, {"use": "in_front", "args": {"a": {"kind": "fountain"}, "b": {"kind": "tower"}}}])
+        );
+    }
+
+    fn rel(relation: Relation, a: &str, b: &str) -> Rel {
+        Rel { relation, a: a.into(), b: b.into() }
+    }
+
+    #[test]
+    fn the_offline_reader_finds_object_relations() {
+        assert_eq!(read_rels("fountain in front of a tower at sunset"), [rel(Relation::InFront, "fountain", "tower")]);
+        assert_eq!(read_rels("A red car in front of the tall tower, from the street"), [rel(Relation::InFront, "car", "tower")]);
+        assert_eq!(read_rels("statue lined up with the bridge. Rooftop"), [rel(Relation::LinedUp, "statue", "bridge")]);
+        assert_eq!(read_rels("a tree next to the church"), [rel(Relation::Beside, "tree", "church")]);
+        // the sun is the framing, not an object
+        assert!(read_rels("Sunset between two towers from a rooftop in Downtown LA").is_empty());
+        assert!(read_rels("the sun in front of a tower").is_empty());
+        assert!(read_rels("in front of").is_empty());
+    }
+
+    #[test]
+    fn model_objects_are_kept_only_when_named() {
+        let v = json!([{"relation": "in_front", "a": " Fountain ", "b": "tower"}, {"relation": "in_front", "a": "sun", "b": "tower"},
+                       {"relation": "beside", "a": "", "b": "x"}, {"relation": "under", "a": "x", "b": "y"}]);
+        assert_eq!(rels_from_model(&v).unwrap(), [rel(Relation::InFront, "fountain", "tower")]);
+        assert!(rels_from_model(&json!(null)).is_none(), "missing: the offline reader decides");
+    }
+
+    #[test]
+    fn the_note_says_plainly_what_isnt_checked() {
+        let r = [rel(Relation::InFront, "fountain", "tower")];
+        assert_eq!(cant_check_note(&r, Event::Sunset).unwrap(), "I can't place the fountain or the tower yet; searching for the sunset part.");
+        assert_eq!(cant_check_note(&[], Event::Sunset), None);
+        let t = text_for_sheet("fountain at sunset", &r);
+        assert!(t.starts_with("fountain at sunset\n[Not checked by the search") && t.contains("fountain in front of a tower"), "{t}");
+        assert_eq!(text_for_sheet("x", &[]), "x");
+    }
+
+    #[test]
+    fn the_sheet_never_claims_unchecked_objects() {
+        let r = [rel(Relation::InFront, "fountain", "tower")];
+        assert!(names_any("Fountain and Tower at Sunset", &["fountain"]));
+        assert!(names_any("two towers", &["tower"]));
+        assert!(!names_any("Towering light", &["tower"]));
+        let mut sheet: CallSheet = serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/call_sheet.json")).unwrap()).unwrap();
+        sheet.title = "Fountain and Tower at Sunset".into();
+        sheet.summary = "Frame the fountain against the tower. The sun drops at 19:58. Arrive by 19:00.".into();
+        assert!(keep_unchecked_out(&mut sheet, &r, "Downtown LA"));
+        assert!(!names_any(&sheet.title, &["fountain", "tower"]), "{}", sheet.title);
+        assert_eq!(sheet.summary, "The sun drops at 19:58. Arrive by 19:00.");
+        assert!(!keep_unchecked_out(&mut sheet, &r, "Downtown LA"), "nothing left to change");
+        sheet.summary = "A fountain shot.".into();
+        keep_unchecked_out(&mut sheet, &r, "Downtown LA");
+        assert!(sheet.summary.starts_with("The best spots for the"));
     }
 
     // ---- whole turns: synthetic grid, no network ----
@@ -502,10 +764,73 @@ mod tests {
         assert_eq!(r.ask.unwrap().question, "Which tower should the fountain sit in front of?");
         assert_eq!(r.model, claude::DEFAULT_MODEL);
         // only what the user said (+ the map's area and date), not the model's guesses
-        assert_eq!(r.understood, ["Sunset", "the chosen area", "Sun 21 June"]);
+        // (the model sent no `objects`, so the offline reader found the fountain; it's flagged, not claimed)
+        assert_eq!(r.understood, ["Sunset", "the chosen area", "Sun 21 June", "fountain in front of a tower (not checked yet)"]);
         let body = &seen.lock().unwrap()[0].1;
         assert!(body["messages"][0]["content"].as_str().unwrap().contains("Filmmaker: fountain in front of a tower at sunset"));
         assert!(body["messages"][0]["content"].as_str().unwrap().contains("already picked the area"));
+    }
+
+    /// A fake Messages API that answers with `replies` in turn (the last one repeats), recording each request body.
+    async fn fake_claude_seq(replies: Vec<serde_json::Value>) -> (Claude, Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        use axum::routing::post;
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let app = axum::Router::new().route(
+            "/v1/messages",
+            post(move |Json(body): Json<serde_json::Value>| {
+                let log = log.clone();
+                let replies = replies.clone();
+                async move {
+                    let mut l = log.lock().unwrap();
+                    l.push(body);
+                    Json(replies[(l.len() - 1).min(replies.len() - 1)].clone())
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (Claude::new("test-key".into(), claude::DEFAULT_MODEL.into(), url, &reqwest::Client::new()), seen)
+    }
+
+    #[tokio::test]
+    async fn objects_become_goals_but_the_sheet_doesnt_claim_them() {
+        let turn = json!({"place": "", "date": "", "event": "sunset", "standing": "any", "framing": "clear", "known": ["event", "framing", "standing"],
+                          "ready": true, "question": "", "choices": [], "objects": [{"relation": "in_front", "a": "fountain", "b": "tower"}]});
+        let words = json!({"title": "Fountain and Tower at Sunset", "summary": "Line the fountain up with the tower. Golden light all evening.", "notes": [], "asks": []});
+        let ans = super::super::tests::answer;
+        let (g, seen) = fake_claude_seq(vec![ans(&turn.to_string()), ans(&words.to_string())]).await;
+        let st = crate::testkit::state(crate::testkit::city());
+        let r = chat_with(&st, city_req(&[("u", "fountain in front of a tower at sunset, either roof or street")]), now(), Some(g)).await.unwrap();
+
+        let brief = r.brief.unwrap();
+        assert_eq!(brief.goals.iter().map(Goal::name).collect::<Vec<_>>(), ["sun_clear", "in_front"]);
+        assert_eq!(brief.text, "fountain in front of a tower at sunset, either roof or street", "the user's words come back unchanged");
+        assert_eq!(r.note.as_deref(), Some("I can't place the fountain or the tower yet; searching for the sunset part."));
+        assert!(r.understood.contains(&"fountain in front of a tower (not checked yet)".to_string()), "{:?}", r.understood);
+
+        // the sheet writer was told, and its claim was taken out anyway
+        let bodies = seen.lock().unwrap();
+        let write_prompt = bodies.last().unwrap()["messages"][0]["content"].as_str().unwrap().to_string();
+        assert!(write_prompt.contains("Not checked by the search") && write_prompt.contains("fountain in front of a tower"), "{write_prompt}");
+        let sheet = r.sheet.unwrap();
+        assert!(!names_any(&sheet.title, &["fountain", "tower"]), "{}", sheet.title);
+        assert!(!names_any(&sheet.summary, &["fountain", "tower"]), "{}", sheet.summary);
+        assert_eq!(sheet.brief.text, brief.text);
+        assert_eq!(sheet.caveats[0], r.note.unwrap());
+        assert!(sheet.steps.iter().any(|s| s.tool == "goals" && s.summary.contains("051/052")), "{:?}", sheet.steps);
+    }
+
+    #[tokio::test]
+    async fn the_mock_keeps_objects_as_goals_too() {
+        let st = crate::testkit::state(crate::testkit::city());
+        let mut q = city_req(&[("u", "fountain in front of a tower at sunset")]);
+        q.go = true;
+        let r = chat_with(&st, q, now(), None).await.unwrap();
+        assert_eq!(r.brief.unwrap().goals.len(), 2);
+        assert!(r.note.unwrap().starts_with("I can't place the fountain"));
+        assert!(!names_any(&r.sheet.unwrap().title, &["fountain"]));
     }
 
     #[tokio::test]

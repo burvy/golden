@@ -107,6 +107,7 @@ a{color:var(--link)}
 #chips button.def{background:linear-gradient(180deg,var(--sun2),var(--sun));color:var(--on-sun)}#chips small{font-weight:500;opacity:.8}
 #known{margin-top:8px;font-size:13px;line-height:1.9}#known:empty{display:none}
 .chip.pick{border-style:dashed;background:var(--panel);color:var(--mute);font-weight:500}
+.chip.unchecked{border-style:dotted;border-color:var(--sun);background:var(--panel);color:var(--mute);font-weight:500}
 #chatform{display:flex;gap:8px;margin-top:10px;align-items:flex-end}#chatform textarea{min-height:44px;height:44px;flex:1;resize:none;line-height:1.35}
 @media(prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.7}#chatlog{scroll-behavior:auto}}
 /* Phone and tablet (task 028): one column in the order you use it — brief, spots, a full-width map, the spot's view,
@@ -237,8 +238,10 @@ async function search(ev,brief){if(!brief)return;S.busy=true;S.err='';S.sel=null
 const CHAT={m:[],busy:false,done:false};
 const GREET='What do you want to shoot? Tell me the place, the light and the day if you know them. I’ll ask about anything that changes where you should stand.';
 function bubble(role,html,cls=''){const d=document.createElement('div');d.className=`b ${role} ${cls}`;d.innerHTML=html;const L=$('#chatlog');L.appendChild(d);L.scrollTop=L.scrollHeight;return d}
-const PICK=/ \(my pick\)$/;
-function knownHTML(w){return w.map(x=>PICK.test(x)?`<span class="chip pick" title="My pick: say if you want something else">${esc(x.replace(PICK,''))} · my pick</span>`:`<span class="chip">${esc(x)}</span>`).join(' ')}
+const PICK=/ \(my pick\)$/,UNCHECKED=/ \(not checked yet\)$/;
+function knownHTML(w){return w.map(x=>PICK.test(x)?`<span class="chip pick" title="My pick: say if you want something else">${esc(x.replace(PICK,''))} · my pick</span>`
+ :UNCHECKED.test(x)?`<span class="chip unchecked" title="The search can’t check where objects are yet; the spots are picked for the sun">${esc(x.replace(UNCHECKED,''))} · not checked yet</span>`
+ :`<span class="chip">${esc(x)}</span>`).join(' ')}
 function chips(list){const c=$('#chips');c.innerHTML=list.map((t,i)=>`<button type="button" class="${i?'':'def'}" data-c="${i}">${esc(t)}${i?'':' <small>· default</small>'}</button>`).join('');
  c.querySelectorAll('button').forEach(b=>b.onclick=()=>send(list[+b.dataset.c],false,true))}
 function newChat(){CHAT.m=[];CHAT.done=false;$('#chatlog').innerHTML='';bubble('agent',esc(GREET));chips([]);$('#known').innerHTML='';$('#gonow').hidden=true}
@@ -255,6 +258,7 @@ async function send(text,go,ev){text=(text||'').trim();if(CHAT.busy||(!text&&!go
    $('#known').innerHTML=r.understood.length?`<span class="mute">So far:</span> ${knownHTML(r.understood)}`:'';$('#gonow').hidden=false;
    if($('#list').querySelector('.pipe'))renderList()}
   else{CHAT.done=true;$('#gonow').hidden=true;$('#known').innerHTML='';const n=r.sheet.spots.length;
+   if(r.note)bubble('agent',esc(r.note));
    bubble('agent',`Searched for ${knownHTML(r.understood)}<br>${n?`Found ${n} spot${n>1?'s':''}: they’re on the map, best first, with a call sheet.`:'No spots fit.'} Type a new brief to start again.`);
    applySheet(r.sheet,ev)}}
  catch(e){wait.remove();
