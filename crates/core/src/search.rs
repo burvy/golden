@@ -481,6 +481,7 @@ fn make_spot(ctx: &SpotContext, s: &Scored, rank: u32, score_01: f64) -> Spot {
         why,
         building_id: None,
         scores,
+        investigation: None,
     }
 }
 
@@ -783,7 +784,7 @@ mod tests {
     fn brief(radius_m: f64, standing: Standing, framing: Framing) -> Brief {
         Brief {
             text: String::new(),
-            area: Area { lat: LAT, lon: LON, radius_m },
+            area: Area { lat: LAT, lon: LON, radius_m, name: None },
             date: "2026-06-21".into(),
             tz: "America/Los_Angeles".into(),
             event: Event::Sunset,
@@ -940,7 +941,7 @@ mod tests {
         let g = grid(100, |_, _| None);
         let b = Brief { date: "21/06/2026".into(), ..brief(50.0, Standing::Any, Framing::Clear) };
         assert!(matches!(search(&g, &b, PDT), Err(SearchError::BadDate(_))));
-        let b = Brief { area: Area { lat: 40.0, lon: LON, radius_m: 50.0 }, ..brief(50.0, Standing::Any, Framing::Clear) };
+        let b = Brief { area: Area { lat: 40.0, lon: LON, radius_m: 50.0, name: None }, ..brief(50.0, Standing::Any, Framing::Clear) };
         assert_eq!(search(&g, &b, PDT), Err(SearchError::AreaOffGrid));
         assert_eq!(search(&g, &brief(0.0, Standing::Any, Framing::Clear), PDT), Err(SearchError::BadArea));
     }

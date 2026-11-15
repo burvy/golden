@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::building::Contact;
-use crate::search::{default_tz, Area, Brief, Spot};
+use crate::search::{default_tz, Area, Brief, SearchResult, Spot};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +36,10 @@ pub struct CallSheet {
     /// What the agent did, in order, so the app can show its work. May be empty.
     #[serde(default)]
     pub steps: Vec<AgentStep>,
+    /// The search the spots came from (heat, goal layers, funnel stages, up to `max_spots` spots),
+    /// so the app can draw the map and re-weight goals. Left out by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchResult>,
 }
 
 /// One thing the agent did: which tool (or "read" / "plan" / "write") and what came of it.

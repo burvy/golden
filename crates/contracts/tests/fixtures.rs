@@ -283,3 +283,112 @@ fn object_refs() {
     }
     assert!(OBJECT_KINDS.contains(&"building"));
 }
+
+// ---- goal layers and funnel stages (frontend v2, task 057/059) ------------------------------
+
+/// The browser's rule (docs/contracts.md#goal-layers-and-stages): rebuild the combined heat and the
+/// picked spots from the goal layers alone. Core must give the same answer for the same weights.
+fn rebuild(searched: &HeatGrid, layers: &[GoalLayer], spacing_m: f64, n: usize) -> (Vec<Option<f64>>, Vec<usize>) {
+    let cells = searched.values.len();
+    let dropped = |i: usize| layers.iter().any(|l| l.gate.contains(&(i as u32)) || (l.must && l.heat.values[i].unwrap_or(0.0) <= 0.0));
+    let mut ranked: Vec<(&GoalLayer, f64)> = layers.iter().filter(|l| l.weight > 0.0).map(|l| (l, l.weight)).collect();
+    if ranked.is_empty() {
+        ranked = layers.iter().map(|l| (l, 1.0 / layers.len() as f64)).collect();
+    }
+    let raw: Vec<Option<f64>> = (0..cells)
+        .map(|i| {
+            searched.values[i]?;
+            Some(if dropped(i) { 0.0 } else { ranked.iter().map(|(l, w)| w * f64::from(l.heat.values[i].unwrap())).sum() })
+        })
+        .collect();
+    let best = raw.iter().flatten().fold(0.0, |a: f64, &b| a.max(b));
+    let heat = raw.iter().map(|v| v.map(|r| if best > 0.0 { r / best } else { 0.0 })).collect();
+    let mut order: Vec<usize> = (0..cells).filter(|&i| raw[i].unwrap_or(0.0) > 0.0).collect();
+    order.sort_by(|&a, &b| raw[b].unwrap().total_cmp(&raw[a].unwrap()).then(a.cmp(&b)));
+    let h = &layers[0].heat;
+    let mut picked: Vec<usize> = vec![];
+    for i in order {
+        if picked.len() == n {
+            break;
+        }
+        if picked.iter().all(|&p| metres(cell_latlon(h, p), cell_latlon(h, i)) >= spacing_m) {
+            picked.push(i);
+        }
+    }
+    (heat, picked)
+}
+
+/// Centre of heat cell `i` (row 0 north), with the flat formula `DsmGrid` uses.
+fn cell_latlon(h: &HeatGrid, i: usize) -> (f64, f64) {
+    let (col, row) = ((i as u32 % h.width) as f64, (i as u32 / h.width) as f64);
+    let east = (col + 0.5 - f64::from(h.width) / 2.0) * h.cell_m;
+    let north = (f64::from(h.height) / 2.0 - row - 0.5) * h.cell_m;
+    (h.center_lat + (north / EARTH_R).to_degrees(), h.center_lon + (east / (EARTH_R * h.center_lat.to_radians().cos())).to_degrees())
+}
+
+fn metres(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let north = (b.0 - a.0).to_radians() * EARTH_R;
+    let east = (b.1 - a.1).to_radians() * EARTH_R * a.0.to_radians().cos();
+    east.hypot(north)
+}
+
+#[test]
+fn search_layers() {
+    let r: SearchResult = load("search_layers.json");
+    assert_eq!(r.brief.area.name.as_deref(), Some("Downtown LA, around Grand Tower"));
+    let names: Vec<&str> = r.brief.goals.iter().map(Goal::name).collect();
+    assert_eq!(r.layers.iter().map(|l| l.goal.as_str()).collect::<Vec<_>>(), names, "one layer per goal, same order");
+    for (l, g) in r.layers.iter().zip(&r.brief.goals) {
+        assert_eq!((l.weight, l.must), (g.weight_or_default(), g.must));
+        assert_eq!((l.heat.width, l.heat.height, l.heat.cell_m), (r.heat.width, r.heat.height, r.heat.cell_m), "same grid as heat");
+        assert!(l.heat.values.iter().zip(&r.heat.values).all(|(a, b)| b.is_some() || a.is_none()), "null where nothing was searched");
+        assert!(r.heat.values.iter().zip(&l.heat.values).any(|(b, a)| b.is_some() && a.is_none()) || !r.stages.iter().any(|s| s.goal.is_some()), "null where an earlier gate stopped the funnel");
+        assert!(l.heat.values.iter().flatten().all(|v| (0.0..=1.0).contains(v)));
+    }
+    assert!(r.stages.windows(2).all(|w| w[0].n >= w[1].n), "the funnel only narrows");
+    assert!(r.objects.iter().any(|o| o.id == "costar:52227" && o.name.as_deref() == Some("Grand Tower")), "the tower the goals name is on the map");
+    assert_eq!(r.stages[1].n, r.searched, "'somewhere to stand' is what was searched");
+    assert!(r.stages.iter().filter_map(|s| s.goal.as_deref()).all(|g| names.contains(&g)));
+    let notes: Vec<Verdict> = r.spots.iter().filter_map(|s| s.investigation.as_ref().map(|i| i.verdict)).collect();
+    assert_eq!(notes, [Verdict::Confirmed, Verdict::Caution, Verdict::Confirmed, Verdict::Caution, Verdict::Confirmed]);
+
+    // the browser's rebuild gives back the server's heat and spots
+    for s in &r.spots {
+        let at_spot = |&i: &usize| { let (a, b) = cell_latlon(&r.heat, i); (a - s.lat).abs() < 1e-5 && (b - s.lon).abs() < 1e-5 };
+        let i = (0..r.heat.values.len()).find(at_spot).expect("each spot is a cell centre");
+        assert!(r.layers.iter().all(|l| l.heat.values[i].is_some()), "every goal is scored at spot {}", s.rank);
+    }
+    let (heat, picked) = rebuild(&r.heat, &r.layers, r.spacing_m.unwrap(), r.brief.max_spots as usize);
+    for (mine, theirs) in heat.iter().zip(&r.heat.values) {
+        assert_eq!(mine.is_some(), theirs.is_some());
+        if let (Some(a), Some(b)) = (mine, theirs) {
+            assert!((a - f64::from(*b)).abs() < 1e-3, "heat {a} vs {b}");
+        }
+    }
+    let at: Vec<(f64, f64)> = picked.iter().map(|&i| cell_latlon(&r.heat, i)).collect();
+    assert_eq!(at.len(), r.spots.len());
+    for (s, (lat, lon)) in r.spots.iter().zip(at) {
+        assert!((s.lat - lat).abs() < 1e-5 && (s.lon - lon).abs() < 1e-5, "spot {} is the cell the browser picks", s.rank);
+    }
+
+    // weight edits only (a must switched off needs a new search): turn the roof preference off
+    let mut sun_only = r.layers.clone();
+    sun_only[3].weight = 0.0;
+    let (_, picked2) = rebuild(&r.heat, &sun_only, r.spacing_m.unwrap(), 3);
+    assert_eq!(picked2.len(), 3);
+    assert_ne!(picked2, picked[..3], "re-weighting changes the top spots");
+}
+
+#[test]
+fn call_sheet_carries_its_search() {
+    let mut sheet: CallSheet = load("call_sheet.json");
+    assert!(sheet.search.is_none(), "older sheets have no search");
+    sheet.search = Some(load("search_layers.json"));
+    let back: CallSheet = serde_json::from_str(&serde_json::to_string(&sheet).unwrap()).unwrap();
+    assert_eq!(back, sheet);
+    let old: SearchResult = load("search_result.json");
+    assert!(old.layers.is_empty() && old.stages.is_empty() && old.spacing_m.is_none(), "older results still parse");
+    assert!(!serde_json::to_string(&old).unwrap().contains("layers"), "left out when empty");
+    let bad = r#"{"verdict":"maybe","note":"x"}"#;
+    assert!(serde_json::from_str::<Investigation>(bad).is_err(), "verdicts are a fixed set");
+}
