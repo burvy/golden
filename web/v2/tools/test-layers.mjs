@@ -1,5 +1,6 @@
 // node web/v2/tools/test-layers.mjs [result.json]: the page's rebuild gives back the server's heat and spots
 // for the searched weights (docs/contracts.md#goal-layers-and-stages), and edits behave.
+// (a saved result needs 4 goals: goal 1 a must that gates, goals 2 and 3 soft, like the fixture)
 import { readFileSync } from 'node:fs';
 import { rebuild, initialGoals, stagesFor, serverSpotAt, editedGoals, needsServer } from '../js/layers.js';
 const file = process.argv[2] || new URL('../fixtures/search_layers.json', import.meta.url);
@@ -23,6 +24,6 @@ ok(!needsServer(r, g6) && rebuild(r, g6, 3).picks.every(i => r.layers.every(L =>
 const g3 = initialGoals(r); g3[3].removed = true;
 ok(!needsServer(r, g3), 'removing a soft goal is local');
 const p3 = rebuild(r, g3, 3).picks; ok(p3.join() !== run.picks.slice(0, 3).join(), 'removing a goal re-ranks');
-ok(editedGoals(r.brief, g3).length === r.brief.goals.length - 1 && editedGoals(r.brief, g3)[0].must === true, 'edited goals back to brief JSON');
+ok(editedGoals(r.brief, g3).length === r.brief.goals.length - 1 && !!editedGoals(r.brief, g3)[0].must === !!r.layers[0].must, 'edited goals back to brief JSON');
 console.log(bad ? `${bad} failed` : 'layers: all ok');
 process.exit(bad ? 1 : 0);
